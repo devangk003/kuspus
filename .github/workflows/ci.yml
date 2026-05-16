@@ -1,0 +1,18 @@
+# KusPus CI — build, test, lint on every PR + push to main.
+# Phase 12 — see TECH_SPEC §31.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  placeholder:
+    runs-on: windows-latest
+    steps:
+      - name: Not implemented
+        run: |
+          echo "ci.yml not implemented yet (Phase 12)."
+          exit 1

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>KusPus.App</RootNamespace>
+    <AssemblyName>KusPus</AssemblyName>
+    <!-- Phase 6 will add app.manifest for PerMonitorV2 DPI declaration. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KusPus.Core\KusPus.Core.csproj" />
+    <ProjectReference Include="..\KusPus.Native\KusPus.Native.csproj" />
+    <ProjectReference Include="..\KusPus.Audio\KusPus.Audio.csproj" />
+    <ProjectReference Include="..\KusPus.Whisper\KusPus.Whisper.csproj" />
+    <ProjectReference Include="..\KusPus.Persistence\KusPus.Persistence.csproj" />
+  </ItemGroup>
+
+</Project>

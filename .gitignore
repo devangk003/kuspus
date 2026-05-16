@@ -1,0 +1,63 @@
+# Build output
+bin/
+obj/
+out/
+publish/
+[Bb]in/
+[Oo]bj/
+
+# Visual Studio
+.vs/
+*.user
+*.userprefs
+*.suo
+*.sln.docstates
+
+# Rider / JetBrains
+.idea/
+*.DotSettings.user
+
+# VS Code
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Native build artifacts
+third_party/whisper.cpp/build/
+third_party/whisper.cpp/build-*/
+
+# Installer payload (rebuilt locally each release)
+installer/payload/
+installer/Output/
+
+# Logs and local data
+*.log
+*.tmp
+*.bak
+
+# Test results
+[Tt]est[Rr]esults/
+
+# OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+# Sentry DSN / secrets (just in case)
+*.secrets
+secrets.json
+
+# .NET tools cache
+.dotnet/
+
+# Claude Code session state (per-user, not for VCS)
+.claude/
