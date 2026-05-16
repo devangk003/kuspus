@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "hfRepoCommit": "TODO_PIN_BEFORE_FIRST_RELEASE",
+  "models": [
+    {
+      "id": "ggml-tiny.en",
+      "displayName": "Tiny (English)",
+      "fileName": "ggml-tiny.en.bin",
+      "sizeBytes": 78643200,
+      "sha256": "TODO_FILL_AFTER_DOWNLOADING_VERIFIED_MODEL",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/TODO_PIN/ggml-tiny.en.bin",
+      "bundled": true
+    },
+    {
+      "id": "ggml-base.en",
+      "displayName": "Base (English)",
+      "fileName": "ggml-base.en.bin",
+      "sizeBytes": 147951465,
+      "sha256": "TODO_FILL_AFTER_DOWNLOADING_VERIFIED_MODEL",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/TODO_PIN/ggml-base.en.bin",
+      "bundled": false
+    },
+    {
+      "id": "ggml-small.en",
+      "displayName": "Small (English)",
+      "fileName": "ggml-small.en.bin",
+      "sizeBytes": 487601967,
+      "sha256": "TODO_FILL_AFTER_DOWNLOADING_VERIFIED_MODEL",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/TODO_PIN/ggml-small.en.bin",
+      "bundled": false
+    },
+    {
+      "id": "ggml-medium.en",
+      "displayName": "Medium (English)",
+      "fileName": "ggml-medium.en.bin",
+      "sizeBytes": 1533763059,
+      "sha256": "TODO_FILL_AFTER_DOWNLOADING_VERIFIED_MODEL",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/TODO_PIN/ggml-medium.en.bin",
+      "bundled": false
+    },
+    {
+      "id": "ggml-large-v3",
+      "displayName": "Large v3 (multilingual)",
+      "fileName": "ggml-large-v3.bin",
+      "sizeBytes": 3094623691,
+      "sha256": "TODO_FILL_AFTER_DOWNLOADING_VERIFIED_MODEL",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/TODO_PIN/ggml-large-v3.bin",
+      "bundled": false
+    }
+  ]
+}
