@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/KusPus.App/KusPus.App.csproj" />
+    <Project Path="src/KusPus.Audio/KusPus.Audio.csproj" />
+    <Project Path="src/KusPus.Core/KusPus.Core.csproj" />
+    <Project Path="src/KusPus.Native/KusPus.Native.csproj" />
+    <Project Path="src/KusPus.Persistence/KusPus.Persistence.csproj" />
+    <Project Path="src/KusPus.Whisper/KusPus.Whisper.csproj" />
+  </Folder>
+  <Folder Name="/test/">
+    <Project Path="test/KusPus.Core.Tests/KusPus.Core.Tests.csproj" />
+    <Project Path="test/KusPus.Persistence.Tests/KusPus.Persistence.Tests.csproj" />
+    <Project Path="test/KusPus.Whisper.Tests/KusPus.Whisper.Tests.csproj" />
+  </Folder>
+</Solution>
