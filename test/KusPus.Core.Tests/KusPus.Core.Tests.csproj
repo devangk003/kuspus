@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>KusPus.Core.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\KusPus.Core\KusPus.Core.csproj" />
+  </ItemGroup>
+
+  <!-- Phase 1 will add xunit + FluentAssertions + Microsoft.NET.Test.Sdk. -->
+
+</Project>

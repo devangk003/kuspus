@@ -1,0 +1,17 @@
+# KusPus release — tag-triggered build of the unsigned installer.
+# Phase 12 — see TECH_SPEC §31, §32.
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  placeholder:
+    runs-on: windows-latest
+    steps:
+      - name: Not implemented
+        run: |
+          echo "release.yml not implemented yet (Phase 12)."
+          exit 1
