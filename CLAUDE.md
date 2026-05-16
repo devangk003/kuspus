@@ -109,6 +109,15 @@ When a gate forces a deliberate deviation from TECH_SPEC's literal text, log it 
 - **`src/KusPus.Native/PasteEngine.cs`** — `IClipboardWriter` injection point. Spec §16 calls `Clipboard.SetText` directly, which requires WPF in the Native project. Decoupling via an interface keeps `KusPus.Native` free of WPF deps; the WPF impl ships in Phase 6's `KusPus.App` composition root.
 - **`src/KusPus.Native/JobObjectContainer.cs`** — owns the Job Object handle. Spec §15 says "created in AppCoordinator and injected into WhisperRunner via DI"; in practice the handle lives in this class which implements `IProcessContainer` and is injected as the `WhisperRunner._onProcessStarted` callback. Functionally equivalent.
 - **`src/KusPus.Native/HotkeyEngine.cs`** — Spec §13 step 6 prescribes a `Channel<HookEvent>` between the LL callback and the subject. Real impl emits directly to `Subject<HotkeyEvent>` AFTER releasing the state lock, which avoids the deadlock-under-callback risk without the channel allocation/dispatch overhead. At v1's input rate (a handful of events per chord activation) this is well within the `LowLevelHooksTimeout` budget. Revisit if the watchdog observes timeouts.
+- **`src/KusPus.Whisper/WhisperRunner.cs`** — empty `expectedWhisperSha256` now skips the integrity check (dev mode). Phase 12 release builds populate the SHA from `installer/payload/whisper/SHA256SUMS`.
+- **`src/KusPus.App/`** — Phase 6 milestone code. Several v1-only simplifications, all to be revisited in their planned phases:
+  - Pill: plain `Topmost`/click-through/`WS_EX_NOACTIVATE` window with a single status text; no acrylic, no animations, no visualizer (Phase 8). Position math uses `System.Windows.Forms.Screen.FromPoint` (good enough for one-monitor dev; Phase 8 switches to `MonitorFromPoint` + `GetDpiForMonitor` for per-monitor DPI).
+  - No MainWindow yet (Phase 9). Tray menu has Toggle + Quit only.
+  - Single-instance "bring main to front" broadcast deferred until MainWindow exists (Phase 9). Second launch just exits silently for now.
+  - `UseWindowsForms=true` alongside `UseWPF=true` to get `NotifyIcon`-style tray and `Screen.FromPoint`. Triggers ambiguous-`Application` references — App uses `using WpfApplication = System.Windows.Application` and qualifies the partial-class base type.
+  - `KUSPUS_WHISPER_DIR` and `KUSPUS_WHISPER_SHA256` env vars override the default `{app}\whisper` path + skip-integrity-check dev mode. Phase 12 installer sets these from real values.
+  - Sentry, autostart registry write, onboarding modal — all deferred to Phases 10/11.
+  - `CA1001` suppressed on `App` (it owns disposable fields but inherits from `System.Windows.Application` which isn't `IDisposable`; cleanup happens in `OnExit`).
 
 Append to this list (don't replace) when a new deviation lands.
 
