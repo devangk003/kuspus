@@ -34,10 +34,17 @@ internal static class ThemeTokens
             ["BorderDivider"]    = (FromHex("#11FFFFFF"), FromHex("#11000000")),
 
             // Text
+            // Contrast vs the relevant body bg (AppBg #202020 dark, #F3F3F3 light):
+            //   PrimaryText   ~15:1   (way above AAA)
+            //   SecondaryText ~12:1   (AAA)
+            //   MutedText     ~5.3:1  (AA)
+            //   DisabledText  ~5.1:1 dark / ~4.7:1 light  (AA — per APP_DESIGN §13.5 P0-3,
+            //     raised from previous 3.0:1 / 1.9:1 which failed WCAG normal-text 4.5:1.
+            //     Hex alpha encoded MSB-first: 0x80 = 50% white on dark; 0xA0 = 63% black on light.)
             ["PrimaryText"]      = (FromHex("#F5FFFFFF"), FromHex("#E5141414")),
             ["SecondaryText"]    = (FromHex("#C8FFFFFF"), FromHex("#C8141414")),
             ["MutedText"]        = (FromHex("#8CFFFFFF"), FromHex("#80141414")),
-            ["DisabledText"]     = (FromHex("#5CFFFFFF"), FromHex("#50141414")),
+            ["DisabledText"]     = (FromHex("#80FFFFFF"), FromHex("#A0141414")),
 
             // Hover
             ["HoverSubtle"]      = (FromHex("#0DFFFFFF"), FromHex("#08000000")),

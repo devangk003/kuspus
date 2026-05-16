@@ -159,6 +159,7 @@ public partial class MainWindow : Window
         UpdateOfflineSubtitle(s.Privacy.OfflineMode);
         ApplyCrashReportsGating(s.Privacy.OfflineMode);
         LogsPath.Text = AppPaths.LogsDir;
+        RefreshLogsSize();
 
         // Sidebar footer live state (§13.3) — initial paint from current settings +
         // coordinator snapshot. Updates wired below via PrefsStore.Changes +
@@ -891,6 +892,21 @@ public partial class MainWindow : Window
         ["ggml-large-v3"] = "Most accurate · multilingual",
     };
 
+    // §13.5 P1-4 — per-model download state. Only entries for in-progress or
+    // failed downloads exist; success/idle are derived from on-disk presence in
+    // RenderModelsTab. CTS is held so Cancel can interrupt the HTTP stream.
+    private sealed class ModelDownloadState
+    {
+        public CancellationTokenSource? Cts;
+        public double Percent;
+        public long BytesDone;
+        public long BytesTotal;
+        public string? Error;
+    }
+
+    private readonly Dictionary<string, ModelDownloadState> _modelDownloads =
+        new(StringComparer.Ordinal);
+
     private void RenderModelsTab()
     {
         _modelsRendered = true;
@@ -953,23 +969,14 @@ public partial class MainWindow : Window
         labelStack.Children.Add(titleRow);
         labelStack.Children.Add(subtitle);
 
-        var statusText = installed
-            ? (isActive ? "Active" : "Installed")
-            : "Not installed";
-        var statusBrush = installed
-            ? (isActive
-                ? Theme("Mint")
-                : Theme("MutedText"))
-            : Theme("DisabledText");
-        var status = new TextBlock
-        {
-            Text = statusText,
-            FontFamily = new WpfFontFamily("Segoe UI Variable Text, Segoe UI"),
-            FontSize = 11.5,
-            FontWeight = FontWeights.Medium,
-            Foreground = statusBrush,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
+        // Right-side region depends on state. Five visual states:
+        //   - Active        (installed + currently selected) — mint dot + "Active"
+        //   - Installed     (installed but not active)       — muted "Installed"
+        //   - Downloading   (in flight)                      — progress bar + percent + Cancel
+        //   - Error         (failed previously)              — red text + Retry
+        //   - Not installed (default)                        — Download Btn.Secondary
+        // §13.5 P1-4.
+        UIElement statusRegion = BuildModelStatusRegion(m, installed, isActive);
 
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -977,10 +984,10 @@ public partial class MainWindow : Window
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         Grid.SetColumn(radio, 0);
         Grid.SetColumn(labelStack, 1);
-        Grid.SetColumn(status, 2);
+        Grid.SetColumn(statusRegion, 2);
         grid.Children.Add(radio);
         grid.Children.Add(labelStack);
-        grid.Children.Add(status);
+        grid.Children.Add(statusRegion);
 
         var border = new Border
         {
@@ -1011,6 +1018,241 @@ public partial class MainWindow : Window
                 Foreground = Theme("Mint"),
             },
         };
+    }
+
+    private UIElement BuildModelStatusRegion(ModelDescriptor m, bool installed, bool isActive)
+    {
+        // Error state takes precedence — if a previous download failed, surface
+        // it until the user retries (or the file is dropped in manually).
+        _modelDownloads.TryGetValue(m.Id, out var ds);
+        if (ds is not null && ds.Error is not null)
+        {
+            return BuildModelErrorRegion(m, ds.Error);
+        }
+        if (ds is not null && ds.Cts is not null)
+        {
+            return BuildModelDownloadingRegion(m, ds);
+        }
+        if (installed)
+        {
+            return new TextBlock
+            {
+                Text = isActive ? "Active" : "Installed",
+                FontFamily = new WpfFontFamily("Segoe UI Variable Text, Segoe UI"),
+                FontSize = 11.5,
+                FontWeight = FontWeights.Medium,
+                Foreground = isActive ? Theme("Mint") : Theme("MutedText"),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+        }
+        // Not installed → Download button.
+        var downloadBtn = new System.Windows.Controls.Button
+        {
+            Content = "Download",
+            Style = (Style)System.Windows.Application.Current.FindResource("Btn.Secondary"),
+            Tag = m.Id,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        downloadBtn.Click += OnModelDownloadClick;
+        return downloadBtn;
+    }
+
+    private StackPanel BuildModelDownloadingRegion(ModelDescriptor m, ModelDownloadState ds)
+    {
+        var stack = new StackPanel
+        {
+            Orientation = System.Windows.Controls.Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        // 180 × 4 px mint progress bar per APP_DESIGN §3.3 Tab 3.
+        var trackOuter = new Grid { Width = 180, VerticalAlignment = VerticalAlignment.Center };
+        trackOuter.Children.Add(new Border
+        {
+            Height = 4,
+            Background = Theme("MeterTrack"),
+            CornerRadius = new CornerRadius(2),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        trackOuter.Children.Add(new Border
+        {
+            Height = 4,
+            Background = Theme("Mint"),
+            CornerRadius = new CornerRadius(2),
+            HorizontalAlignment = System.Windows.HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Center,
+            Width = Math.Max(0, Math.Min(180, ds.Percent / 100.0 * 180)),
+        });
+        stack.Children.Add(trackOuter);
+
+        stack.Children.Add(new TextBlock
+        {
+            Text = $"  {ds.Percent:F0}%",
+            FontFamily = new WpfFontFamily("Cascadia Mono, Consolas, monospace"),
+            FontSize = 11,
+            Foreground = Theme("MutedText"),
+            VerticalAlignment = VerticalAlignment.Center,
+            MinWidth = 38,
+        });
+
+        var cancelBtn = new System.Windows.Controls.Button
+        {
+            Content = "Cancel",
+            Style = (Style)System.Windows.Application.Current.FindResource("Btn.Ghost"),
+            Tag = m.Id,
+            Margin = new Thickness(10, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        cancelBtn.Click += OnModelCancelClick;
+        stack.Children.Add(cancelBtn);
+        return stack;
+    }
+
+    private StackPanel BuildModelErrorRegion(ModelDescriptor m, string error)
+    {
+        var stack = new StackPanel
+        {
+            Orientation = System.Windows.Controls.Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        stack.Children.Add(new TextBlock
+        {
+            Text = error,
+            FontFamily = new WpfFontFamily("Segoe UI Variable Text, Segoe UI"),
+            FontSize = 11.5,
+            Foreground = Theme("ErrorRed"),
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            MaxWidth = 220,
+        });
+        var retryBtn = new System.Windows.Controls.Button
+        {
+            Content = "Retry",
+            Style = (Style)System.Windows.Application.Current.FindResource("Btn.Secondary"),
+            Tag = m.Id,
+            Margin = new Thickness(10, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        retryBtn.Click += OnModelDownloadClick;
+        stack.Children.Add(retryBtn);
+        return stack;
+    }
+
+    private void OnModelDownloadClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button btn || btn.Tag is not string id)
+        {
+            return;
+        }
+        var descriptor = _models.Manifest.Models.FirstOrDefault(m => m.Id == id);
+        if (descriptor is null)
+        {
+            return;
+        }
+        // If Offline Mode is on, EgressAllowlistHandler throws — but we should
+        // pre-empt with a clearer message rather than launching a download that
+        // immediately fails with "Network blocked". §13.1 keeps the contract honest.
+        if (_prefs.Current.Privacy.OfflineMode)
+        {
+            _modelDownloads[id] = new ModelDownloadState
+            {
+                Error = "Disabled while Offline Mode is on.",
+            };
+            _modelsRendered = false;
+            RenderModelsTab();
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        var state = new ModelDownloadState
+        {
+            Cts = cts,
+            Percent = 0,
+            BytesDone = 0,
+            BytesTotal = descriptor.SizeBytes,
+        };
+        _modelDownloads[id] = state;
+        _modelsRendered = false;
+        RenderModelsTab();
+
+        var progress = new Progress<DownloadProgress>(p =>
+        {
+            // IProgress<T> already marshals to the captured SynchronizationContext
+            // (UI thread for the constructor call). Throttle re-renders to ~3 Hz so
+            // the StackPanel rebuild doesn't dominate the CPU on a fast download.
+            state.BytesDone = p.BytesDownloaded;
+            state.BytesTotal = p.TotalBytes > 0 ? p.TotalBytes : descriptor.SizeBytes;
+            double newPct = state.BytesTotal > 0
+                ? (double)state.BytesDone / state.BytesTotal * 100.0
+                : 0;
+            if (Math.Abs(newPct - state.Percent) < 0.5)
+            {
+                return;
+            }
+            state.Percent = newPct;
+            _modelsRendered = false;
+            RenderModelsTab();
+        });
+
+        _ = Task.Run(async () =>
+        {
+            var result = await _models.DownloadAsync(descriptor, progress, cts.Token).ConfigureAwait(false);
+            await Dispatcher.BeginInvoke(() =>
+            {
+                if (result.Success)
+                {
+                    _modelDownloads.Remove(id);
+#pragma warning disable CA1848, CA1873
+                    _logger.LogInformation("Model {Id} downloaded.", id);
+#pragma warning restore CA1848, CA1873
+                }
+                else
+                {
+                    // Cancellation comes back as a Fail with a "Download cancelled." message.
+                    bool cancelled = cts.IsCancellationRequested;
+                    if (cancelled)
+                    {
+                        _modelDownloads.Remove(id);
+                    }
+                    else
+                    {
+                        state.Cts = null;
+                        state.Error = ShortenDownloadError(result.Error ?? "Download failed.");
+                    }
+                }
+                cts.Dispose();
+                _modelsRendered = false;
+                RenderModelsTab();
+            });
+        });
+    }
+
+    private void OnModelCancelClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button btn || btn.Tag is not string id)
+        {
+            return;
+        }
+        if (_modelDownloads.TryGetValue(id, out var state) && state.Cts is not null)
+        {
+            state.Cts.Cancel();
+            // The completion continuation removes the entry and re-renders.
+        }
+    }
+
+    private static string ShortenDownloadError(string raw)
+    {
+        // ModelManager wraps the underlying error with a prefix. Strip it for display.
+        const string prefix = "HTTP error downloading ";
+        if (raw.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            int colon = raw.IndexOf(':', prefix.Length);
+            if (colon > 0 && colon + 2 < raw.Length)
+            {
+                return raw[(colon + 2)..];
+            }
+        }
+        // "Network blocked — Offline Mode is on." comes straight through.
+        return raw.Length > 80 ? raw[..77] + "…" : raw;
     }
 
     private async void OnModelRadioChecked(object sender, RoutedEventArgs e)
@@ -1060,15 +1302,29 @@ public partial class MainWindow : Window
     private static string SpeedLabel(string id) =>
         SpeedLabels.TryGetValue(id, out var s) ? s : "—";
 
-    // ── History tab (9G) ────────────────────────────────────────────────────
+    // ── History tab (9G + §13.5 P1-2) ───────────────────────────────────────
+
+    private DispatcherTimer? _historySearchDebounce;
+    private string _historyQuery = string.Empty;
 
     private async Task RenderHistoryTabAsync()
     {
         _historyRendered = true;
+        await ReloadHistoryAsync().ConfigureAwait(true);
+    }
+
+    private async Task ReloadHistoryAsync()
+    {
         try
         {
-            var rows = await _history.SearchAsync(null, 50, 0).ConfigureAwait(true);
-            HistoryStats.Text = $"{rows.Count} transcripts loaded.";
+            // SearchAsync(null) returns most recent first; query goes through FTS.
+            string? query = string.IsNullOrWhiteSpace(_historyQuery) ? null : _historyQuery;
+            var rows = await _history.SearchAsync(query, 50, 0).ConfigureAwait(true);
+
+            HistoryStats.Text = query is null
+                ? $"{rows.Count} transcripts shown · most recent first"
+                : $"{rows.Count} match{(rows.Count == 1 ? string.Empty : "es")} for “{query}”";
+
             HistoryList.Children.Clear();
             foreach (var r in rows)
             {
@@ -1078,7 +1334,9 @@ public partial class MainWindow : Window
             {
                 HistoryList.Children.Add(new TextBlock
                 {
-                    Text = "No transcripts yet. Dictate something to populate history.",
+                    Text = query is null
+                        ? "No transcripts yet. Dictate something to populate history."
+                        : "No transcripts match that search.",
                     FontFamily = new WpfFontFamily("Segoe UI Variable Text, Segoe UI"),
                     FontSize = 12,
                     Foreground = Theme("MutedText"),
@@ -1086,6 +1344,8 @@ public partial class MainWindow : Window
                     Margin = new Thickness(0, 10, 0, 0),
                 });
             }
+            // Disable Purge when there's literally nothing to purge.
+            PurgeAllButton.IsEnabled = rows.Count > 0 || query is not null;
         }
         catch (Exception ex) when (ex is Microsoft.Data.Sqlite.SqliteException or System.IO.IOException)
         {
@@ -1093,6 +1353,73 @@ public partial class MainWindow : Window
             _logger.LogWarning(ex, "Failed to query history.");
 #pragma warning restore CA1848, CA1873
             HistoryStats.Text = "History unavailable.";
+        }
+    }
+
+    private void OnHistorySearchChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+    {
+        // Placeholder visibility — toggled in code rather than a XAML trigger because
+        // the placeholder is overlaid as a sibling on the same Grid column.
+        HistorySearchPlaceholder.Visibility = string.IsNullOrEmpty(HistorySearchBox.Text)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        HistorySearchClear.Visibility = string.IsNullOrEmpty(HistorySearchBox.Text)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+        // 250 ms debounce so we don't fire a SQL query per keystroke.
+        if (_historySearchDebounce is null)
+        {
+            _historySearchDebounce = new DispatcherTimer(DispatcherPriority.Background)
+            {
+                Interval = TimeSpan.FromMilliseconds(250),
+            };
+            _historySearchDebounce.Tick += async (_, _) =>
+            {
+                _historySearchDebounce!.Stop();
+                _historyQuery = HistorySearchBox.Text.Trim();
+                await ReloadHistoryAsync().ConfigureAwait(true);
+            };
+        }
+        _historySearchDebounce.Stop();
+        _historySearchDebounce.Start();
+    }
+
+    private void OnHistorySearchClearClick(object sender, RoutedEventArgs e)
+    {
+        HistorySearchBox.Text = string.Empty;
+        // TextChanged above debounces; force-flush so the empty query takes effect now.
+        _historySearchDebounce?.Stop();
+        _historyQuery = string.Empty;
+        _ = ReloadHistoryAsync();
+    }
+
+    private async void OnPurgeAllClick(object sender, RoutedEventArgs e)
+    {
+        var result = System.Windows.MessageBox.Show(
+            this,
+            "Delete every saved transcript? This cannot be undone.",
+            "Purge all history",
+            System.Windows.MessageBoxButton.YesNo,
+            System.Windows.MessageBoxImage.Warning,
+            System.Windows.MessageBoxResult.No);
+        if (result != System.Windows.MessageBoxResult.Yes)
+        {
+            return;
+        }
+        try
+        {
+            await _history.PurgeAllAsync().ConfigureAwait(true);
+#pragma warning disable CA1848, CA1873
+            _logger.LogInformation("History purged by user.");
+#pragma warning restore CA1848, CA1873
+            await ReloadHistoryAsync().ConfigureAwait(true);
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException ex)
+        {
+#pragma warning disable CA1848, CA1873
+            _logger.LogWarning(ex, "PurgeAllAsync failed.");
+#pragma warning restore CA1848, CA1873
         }
     }
 
@@ -1341,6 +1668,90 @@ public partial class MainWindow : Window
         CoreVK.Backspace => "Bksp",
         _ => k.ToString(),
     };
+
+    // §13.5 P1-3 — log size + Clear logs.
+    // Total size is computed synchronously from the Logs directory's *.log files.
+    // The Logs folder is small in v1 (cap ~25 MB across 5 daily rolls per App.OnStartup
+    // Serilog config), so enumeration cost is negligible.
+    private void RefreshLogsSize()
+    {
+        try
+        {
+            long total = 0;
+            if (Directory.Exists(AppPaths.LogsDir))
+            {
+                foreach (var file in Directory.EnumerateFiles(AppPaths.LogsDir, "*.log"))
+                {
+                    try { total += new FileInfo(file).Length; }
+                    catch (FileNotFoundException) { /* rolled over mid-enumeration */ }
+                }
+            }
+            LogsSize.Text = FormatBytes(total);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+#pragma warning disable CA1848, CA1873
+            _logger.LogWarning(ex, "Failed to enumerate logs directory.");
+#pragma warning restore CA1848, CA1873
+            LogsSize.Text = "Unavailable";
+        }
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024)
+        {
+            return $"{bytes} bytes";
+        }
+        if (bytes < 1024 * 1024)
+        {
+            return $"{bytes / 1024.0:F1} KB";
+        }
+        return $"{bytes / 1024.0 / 1024.0:F1} MB";
+    }
+
+    private void OnClearLogsClick(object sender, RoutedEventArgs e)
+    {
+        var result = System.Windows.MessageBox.Show(
+            this,
+            "Delete all KusPus log files? The current log will be re-created as needed. " +
+            "Anything you want to keep — copy out first.",
+            "Clear logs",
+            System.Windows.MessageBoxButton.YesNo,
+            System.Windows.MessageBoxImage.Warning,
+            System.Windows.MessageBoxResult.No);
+        if (result != System.Windows.MessageBoxResult.Yes)
+        {
+            return;
+        }
+        int deleted = 0;
+        int skipped = 0;
+        if (Directory.Exists(AppPaths.LogsDir))
+        {
+            foreach (var file in Directory.EnumerateFiles(AppPaths.LogsDir, "*.log"))
+            {
+                try
+                {
+                    File.Delete(file);
+                    deleted++;
+                }
+                catch (IOException)
+                {
+                    // Today's log is held open by Serilog's FileSink — expected; we don't
+                    // tear down the logger to clear logs. Skip and report.
+                    skipped++;
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    skipped++;
+                }
+            }
+        }
+#pragma warning disable CA1848, CA1873
+        _logger.LogInformation("Clear logs: deleted={Deleted} skipped={Skipped}.", deleted, skipped);
+#pragma warning restore CA1848, CA1873
+        RefreshLogsSize();
+    }
 
     private void OnOpenLogsClick(object sender, RoutedEventArgs e)
     {

@@ -458,14 +458,87 @@
                                Margin="0"/>
                 </StackPanel>
 
-                <!-- ── History tab ──────────────────────────────────────── -->
+                <!-- ── History tab (§3.3 Tab 4 + §13.5 P1-2) ────────────────── -->
                 <StackPanel x:Name="ContentHistory" Visibility="Collapsed">
                     <TextBlock Style="{StaticResource SectionHeader}" Text="History"/>
-                    <TextBlock x:Name="HistoryStats"
-                               Text="Loading…"
-                               Style="{StaticResource Type.RowSubtitle}"
-                               Margin="0,0,0,14"/>
+
+                    <!-- Search bar — debounced full-text against transcripts_fts. -->
+                    <Border Style="{StaticResource RowCard}" Margin="0,0,0,16" Padding="14,8">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0"
+                                       Text="&#xE721;"
+                                       FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                       FontSize="14"
+                                       Foreground="{DynamicResource MutedText}"
+                                       VerticalAlignment="Center"/>
+                            <TextBox Grid.Column="1"
+                                     x:Name="HistorySearchBox"
+                                     Margin="10,0,0,0"
+                                     Padding="0,2"
+                                     BorderThickness="0"
+                                     Background="Transparent"
+                                     Foreground="{DynamicResource PrimaryText}"
+                                     CaretBrush="{DynamicResource PrimaryText}"
+                                     FontFamily="Segoe UI Variable Text, Segoe UI"
+                                     FontSize="13"
+                                     VerticalContentAlignment="Center"
+                                     TextChanged="OnHistorySearchChanged"/>
+                            <TextBlock x:Name="HistorySearchPlaceholder"
+                                       Grid.Column="1"
+                                       Text="Search transcripts…"
+                                       Margin="10,0,0,0"
+                                       Foreground="{DynamicResource MutedText}"
+                                       FontFamily="Segoe UI Variable Text, Segoe UI"
+                                       FontSize="13"
+                                       VerticalAlignment="Center"
+                                       IsHitTestVisible="False"/>
+                            <Button Grid.Column="2"
+                                    x:Name="HistorySearchClear"
+                                    Content="&#xE711;"
+                                    FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                    FontSize="11"
+                                    Background="Transparent"
+                                    Foreground="{DynamicResource MutedText}"
+                                    BorderThickness="0"
+                                    Padding="6,2"
+                                    Margin="6,0,0,0"
+                                    Cursor="Hand"
+                                    Visibility="Collapsed"
+                                    Click="OnHistorySearchClearClick"/>
+                        </Grid>
+                    </Border>
+
                     <StackPanel x:Name="HistoryList"/>
+
+                    <!-- Bulk footer (§3.3 Tab 4 #3). -->
+                    <Border Margin="0,18,0,0"
+                            BorderBrush="{DynamicResource BorderDivider}"
+                            BorderThickness="0,1,0,0"
+                            Padding="0,16,0,0">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="HistoryStats"
+                                       Grid.Column="0"
+                                       Text="—"
+                                       Style="{StaticResource Type.RowSubtitle}"
+                                       Margin="0"
+                                       VerticalAlignment="Center"/>
+                            <Button Grid.Column="1"
+                                    x:Name="PurgeAllButton"
+                                    Content="Purge all history"
+                                    Style="{StaticResource Btn.Danger}"
+                                    Click="OnPurgeAllClick"
+                                    VerticalAlignment="Center"/>
+                        </Grid>
+                    </Border>
                 </StackPanel>
 
                 <!-- ── Privacy tab ──────────────────────────────────────── -->
@@ -519,15 +592,52 @@
                     <TextBlock Style="{StaticResource SectionHeader}" Text="Logs"/>
                     <Border Style="{StaticResource RowCard}" Margin="0,0,0,28">
                         <StackPanel>
-                            <TextBlock x:Name="LogsPath"
-                                       Text="—"
-                                       Style="{StaticResource Type.MonoSm}"
-                                       TextWrapping="Wrap"/>
-                            <Button Content="Open in Explorer"
-                                    Click="OnOpenLogsClick"
-                                    Style="{StaticResource Btn.Secondary}"
-                                    HorizontalAlignment="Left"
-                                    Margin="0,10,0,0"/>
+                            <!-- Row 1: total log size + Clear logs (§13.5 P1-3). -->
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Log size"
+                                               Style="{StaticResource Type.RowTitle}"/>
+                                    <TextBlock x:Name="LogsSize"
+                                               Text="Calculating…"
+                                               Style="{StaticResource Type.RowSubtitle}"/>
+                                </StackPanel>
+                                <Button Grid.Column="1"
+                                        Content="Clear logs"
+                                        Style="{StaticResource Btn.Danger}"
+                                        Click="OnClearLogsClick"
+                                        VerticalAlignment="Center"/>
+                            </Grid>
+
+                            <Border Height="1"
+                                    Background="{DynamicResource BorderDivider}"
+                                    Margin="0,14,0,14"/>
+
+                            <!-- Row 2: folder path + Open in Explorer. -->
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Log folder"
+                                               Style="{StaticResource Type.RowTitle}"/>
+                                    <TextBlock x:Name="LogsPath"
+                                               Text="—"
+                                               Style="{StaticResource Type.MonoSm}"
+                                               Margin="0,3,0,0"
+                                               TextTrimming="CharacterEllipsis"
+                                               MaxWidth="500"/>
+                                </StackPanel>
+                                <Button Grid.Column="1"
+                                        Content="Open in Explorer"
+                                        Click="OnOpenLogsClick"
+                                        Style="{StaticResource Btn.Secondary}"
+                                        VerticalAlignment="Center"/>
+                            </Grid>
                         </StackPanel>
                     </Border>
 

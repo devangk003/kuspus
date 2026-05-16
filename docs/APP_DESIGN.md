@@ -1466,19 +1466,19 @@ Applied first in: hotkey-picker listen-mode hint (`Now press the keys you want t
 
 | P0-2 | P0 | Replace stale "Phase X" + Win32 copy (§13.2) | `MainWindow.xaml:344, 418, 485, 527, 752` | done |
 
-| P0-3 | P0 | Raise `DisabledText` contrast to ≥ 4.5:1 | `ThemeTokens.cs:40` | todo |
+| P0-3 | P0 | Raise `DisabledText` contrast to ≥ 4.5:1 | `ThemeTokens.cs:40` | done |
 
 | P0-4 | P0 | Sidebar footer live binding (§13.3) | `MainWindow.xaml:233-246` | done |
 
-| P0-5 | P0 | Audio tab mic-active privacy disclosure | `MainWindow.xaml.cs:692-738` | todo |
+| P0-5 | P0 | Audio tab mic-active privacy disclosure | `MainWindow.xaml.cs:692-738` | done (subtitle "Active only while this tab is open. Audio is never recorded.") |
 
 | P1-1 | P1 | Button styles (primary / secondary / ghost / danger × sm/md/lg) — replace 5 inline-styled call sites | `Styles/Buttons.xaml` + `MainWindow.xaml` | done |
 
-| P1-2 | P1 | History search bar + bulk footer + purge-all flow | `MainWindow.xaml:534-544` | todo |
+| P1-2 | P1 | History search bar + bulk footer + purge-all flow | `MainWindow.xaml:534-544` | done |
 
-| P1-3 | P1 | Privacy Logs size row + Clear logs ghost-danger button | `MainWindow.xaml:607-625` | todo |
+| P1-3 | P1 | Privacy Logs size row + Clear logs ghost-danger button | `MainWindow.xaml:607-625` | done |
 
-| P1-4 | P1 | Models tab download flow for non-installed entries | `MainWindow.xaml.cs:853-930` | todo |
+| P1-4 | P1 | Models tab download flow for non-installed entries | `MainWindow.xaml.cs:853-930` | done |
 
 | P1-5 | P1 | Migrate Models + History row rendering to DataTemplates (remove `Theme()` brush resolver) | `MainWindow.xaml.cs:385-386, 873-906` | todo |
 
