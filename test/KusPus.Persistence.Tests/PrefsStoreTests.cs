@@ -149,6 +149,42 @@ public class PrefsStoreTests : IDisposable
     }
 
     [Fact]
+    public void Unknown_top_level_fields_are_warned_and_ignored()
+    {
+        // TECH_SPEC §9.4: "Unknown fields are warned + ignored."
+        var withExtra =
+            """{"schemaVersion": 1, "futureFeature": true, "hotkey": {"holdThresholdMs": 300}}""";
+        File.WriteAllText(_settingsPath, withExtra);
+        var logger = new CapturingLogger<PrefsStore>();
+
+        using var store = new PrefsStore(_settingsPath, logger);
+
+        // Known fields still load.
+        store.Current.Hotkey.HoldThresholdMs.Should().Be(300);
+        // Unknown field triggered a warning.
+        logger.HasWarningContaining("futureFeature").Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SaveAsync_serialises_concurrent_calls_without_corrupting_the_file()
+    {
+        // TECH_SPEC §9.5: "Concurrent writes serialized by a SemaphoreSlim(1,1)."
+        using var store = new PrefsStore(_settingsPath);
+
+        var baseline = store.Current;
+        var tasks = Enumerable.Range(0, 10)
+            .Select(i => store.SaveAsync(baseline with { Autostart = i % 2 == 0 }))
+            .ToArray();
+        await Task.WhenAll(tasks);
+
+        // If the semaphore is doing its job the file is well-formed JSON.
+        var json = File.ReadAllText(_settingsPath);
+        var parsed = JsonSerializer.Deserialize<AppSettings>(json, TestJsonOptions);
+        parsed.Should().NotBeNull();
+        parsed!.SchemaVersion.Should().Be(1);
+    }
+
+    [Fact]
     public void JSON_property_names_are_camelCase_per_spec()
     {
         using var store = new PrefsStore(_settingsPath);
