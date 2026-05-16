@@ -10,6 +10,7 @@
   <Folder Name="/test/">
     <Project Path="test/KusPus.Audio.Tests/KusPus.Audio.Tests.csproj" />
     <Project Path="test/KusPus.Core.Tests/KusPus.Core.Tests.csproj" />
+    <Project Path="test/KusPus.Native.Tests/KusPus.Native.Tests.csproj" />
     <Project Path="test/KusPus.Persistence.Tests/KusPus.Persistence.Tests.csproj" />
     <Project Path="test/KusPus.Whisper.Tests/KusPus.Whisper.Tests.csproj" />
   </Folder>
