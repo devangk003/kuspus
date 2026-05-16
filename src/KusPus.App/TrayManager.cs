@@ -12,7 +12,7 @@ internal sealed class TrayManager : IDisposable
 {
     private readonly WinFormsApp.NotifyIcon _icon;
 
-    public TrayManager(AppCoordinator coordinator, Action onQuit)
+    public TrayManager(AppCoordinator coordinator, Action onPreferences, Action onQuit)
     {
         _icon = new WinFormsApp.NotifyIcon
         {
@@ -21,8 +21,12 @@ internal sealed class TrayManager : IDisposable
             Visible = true,
         };
 
+        // Menu order per APP_DESIGN §5.2 (truncated for v1 — Active-model
+        // submenu + History item come with the Models / History tab clusters).
         var menu = new WinFormsApp.ContextMenuStrip();
         menu.Items.Add("Toggle Recorder", null, (_, _) => coordinator.ToggleFromTray());
+        menu.Items.Add(new WinFormsApp.ToolStripSeparator());
+        menu.Items.Add("Preferences…", null, (_, _) => onPreferences());
         menu.Items.Add(new WinFormsApp.ToolStripSeparator());
         menu.Items.Add("Quit", null, (_, _) => onQuit());
         _icon.ContextMenuStrip = menu;

@@ -22,27 +22,20 @@
     <!--
         Pill surface per docs/PILL_DESIGN.md.
             200×56, 8px rounded corners. Mica on Win11 (DWMWA_SYSTEMBACKDROP_TYPE).
-            §3.1 dark surface gradient + §3.3 hairline border + drop shadow.
+            Surface gradient, border, text & visualizer all bind to ThemeTokens
+            via {DynamicResource}, so flipping Auto/Light/Dark in Preferences
+            re-themes the pill in lock-step with the MainWindow.
             §10 hover-extend override: width animates 200→280 on hover, revealing
               two icon buttons (Settings placeholder + Close) on the right.
-            Click-through DISABLED (§10.2): pill captures hover so the buttons work.
-            Focus theft still prevented via WS_EX_NOACTIVATE (§6.3).
     -->
     <Border x:Name="PillSurface" CornerRadius="8"
+            Background="{DynamicResource PillSurface}"
+            BorderBrush="{DynamicResource PillBorder}"
+            BorderThickness="1"
             MouseLeftButtonDown="OnPillMouseLeftButtonDown">
-        <Border.Background>
-            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                <!-- §3.1: rgba(38,38,40,0.88) → rgba(28,28,30,0.92) -->
-                <GradientStop Color="#E0262628" Offset="0"/>
-                <GradientStop Color="#EB1C1C1E" Offset="1"/>
-            </LinearGradientBrush>
-        </Border.Background>
-        <Border.BorderBrush>
-            <SolidColorBrush Color="White" Opacity="0.07"/>
-        </Border.BorderBrush>
-        <Border.BorderThickness>1</Border.BorderThickness>
         <Border.Effect>
-            <!-- §3.3 dark shadow (the large diffuse layer; smaller contact layer is left to DWM Mica) -->
+            <!-- §3.3 dark shadow — kept black in both themes; barely visible behind
+                 a light pill anyway. -->
             <DropShadowEffect Color="Black" Direction="270"
                               ShadowDepth="2" BlurRadius="32" Opacity="0.45"/>
         </Border.Effect>
@@ -53,16 +46,12 @@
                 <ColumnDefinition Width="80"/>
             </Grid.ColumnDefinitions>
 
-            <!-- §3.3 inner top highlight, spans full width. -->
             <Rectangle Grid.ColumnSpan="2"
                        VerticalAlignment="Top"
                        Height="1"
-                       Fill="White"
-                       Opacity="0.05"/>
+                       Fill="{DynamicResource PillInnerHighlight}"/>
 
-            <!-- Main 200×56 content column. -->
             <Grid Grid.Column="0">
-                <!-- §3.4 accent line: 136×1.5, gradient-faded ends, top edge. -->
                 <Rectangle x:Name="AccentLine"
                            VerticalAlignment="Top"
                            HorizontalAlignment="Center"
@@ -76,20 +65,12 @@
                         </LinearGradientBrush>
                     </Rectangle.Fill>
                     <Rectangle.Effect>
-                        <!-- §3.4 outer glow when accent is at full opacity. -->
                         <DropShadowEffect x:Name="AccentGlow"
                                           Color="#4DDBA6" BlurRadius="8"
                                           ShadowDepth="0" Opacity="0.6"/>
                     </Rectangle.Effect>
                 </Rectangle>
 
-                <!-- ── Idle state: app icon + "KusPus" label (PRD G4 dev override) ──
-                     Spec §6.1 says no idle pill, but we keep one for now so the
-                     hover-extend close button is always reachable. The icon is
-                     loaded directly from icons/icon.svg via SharpVectors so the
-                     SVG file is the single source of truth (no hand-converted
-                     XAML to drift from it). Aspect ratio is locked by SvgViewbox
-                     Stretch="Uniform"; resizing is just the Height value. -->
                 <StackPanel x:Name="IdleContent"
                             Orientation="Horizontal"
                             HorizontalAlignment="Center"
@@ -103,7 +84,7 @@
                                      SnapsToDevicePixels="True"
                                      UseLayoutRounding="True"/>
                     <TextBlock Text="KusPus"
-                               Foreground="#8CFFFFFF"
+                               Foreground="{DynamicResource MutedText}"
                                FontFamily="Segoe UI Variable Text, Segoe UI"
                                FontSize="13"
                                FontWeight="Medium"
@@ -111,7 +92,6 @@
                                Margin="8,0,0,0"/>
                 </StackPanel>
 
-                <!-- ── Recording state: visualizer + RECORDING label ────────── -->
                 <Grid x:Name="RecordingContent" Opacity="0" IsHitTestVisible="False">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="*"/>
@@ -123,13 +103,9 @@
                             HorizontalAlignment="Center"
                             VerticalAlignment="Bottom"
                             Margin="0,0,0,2"/>
-                    <!-- §3.5 micro-label: 9.5 px, uppercase, weight 500. Spec asks for
-                         letter-spacing 0.08 em which WPF doesn't expose cleanly; the
-                         visual width difference at this size is sub-pixel and we
-                         skip it. -->
                     <TextBlock Grid.Row="1"
                                Text="RECORDING"
-                               Foreground="#8CFFFFFF"
+                               Foreground="{DynamicResource MutedText}"
                                FontFamily="Segoe UI Variable Text, Segoe UI"
                                FontSize="9.5"
                                FontWeight="Medium"
@@ -137,7 +113,6 @@
                                Margin="0,0,0,4"/>
                 </Grid>
 
-                <!-- ── Transcribing state: spinner + text ───────────────────── -->
                 <StackPanel x:Name="TranscribingContent"
                             Orientation="Horizontal"
                             HorizontalAlignment="Center"
@@ -145,13 +120,8 @@
                             Margin="0,2,0,0"
                             Opacity="0"
                             IsHitTestVisible="False">
-                    <!-- 14px arc spinner — 270° (¾ circle), 1.5px stroke, rotated by code-behind.
-                         Rotation pivot is (7,7) in the path's local coordinates — the visual
-                         center of the arc. We deliberately do NOT set RenderTransformOrigin
-                         on the Path: combined with CenterX/Y, it makes the icon orbit instead
-                         of spinning in place. -->
                     <Canvas Width="14" Height="14" VerticalAlignment="Center">
-                        <Path Stroke="#F5FFFFFF"
+                        <Path Stroke="{DynamicResource PrimaryText}"
                               StrokeThickness="1.5"
                               StrokeStartLineCap="Round"
                               StrokeEndLineCap="Round"
@@ -164,7 +134,7 @@
                         </Path>
                     </Canvas>
                     <TextBlock Text="Transcribing…"
-                               Foreground="#F5FFFFFF"
+                               Foreground="{DynamicResource PrimaryText}"
                                FontFamily="Segoe UI Variable Text, Segoe UI"
                                FontSize="13"
                                FontWeight="Medium"
@@ -172,23 +142,21 @@
                                Margin="8,0,0,0"/>
                 </StackPanel>
 
-                <!-- ── Confirmed state: "Pasted into <App>" ─────────────────── -->
                 <TextBlock x:Name="ConfirmedContent"
                            HorizontalAlignment="Center"
                            VerticalAlignment="Center"
                            FontFamily="Segoe UI Variable Text, Segoe UI"
                            FontSize="13"
                            FontWeight="Medium"
+                           Foreground="{DynamicResource PrimaryText}"
                            Opacity="0"
                            IsHitTestVisible="False">
-                    <Run Foreground="#F5FFFFFF" Text="Pasted into "/>
+                    <Run Text="Pasted into "/>
                     <Run x:Name="ConfirmedAppRun"
-                         Foreground="#F5FFFFFF"
                          FontWeight="SemiBold"
                          Text=""/>
                 </TextBlock>
 
-                <!-- ── Error state: red dot + reason ────────────────────────── -->
                 <StackPanel x:Name="ErrorContent"
                             Orientation="Horizontal"
                             HorizontalAlignment="Center"
@@ -203,7 +171,7 @@
                     </Ellipse>
                     <TextBlock x:Name="ErrorText"
                                Text=""
-                               Foreground="#F5FFFFFF"
+                               Foreground="{DynamicResource PrimaryText}"
                                FontFamily="Segoe UI Variable Text, Segoe UI"
                                FontSize="12.5"
                                FontWeight="Medium"
@@ -214,7 +182,6 @@
                 </StackPanel>
             </Grid>
 
-            <!-- ── Hover-extend right column (§10) ──────────────────────────── -->
             <StackPanel x:Name="ButtonPanel"
                         Grid.Column="1"
                         Orientation="Horizontal"
@@ -227,7 +194,6 @@
                         Margin="0,0,4,0"
                         Background="Transparent"
                         BorderThickness="0"
-                        Foreground="#8CFFFFFF"
                         Cursor="Hand"
                         ToolTip="Settings — coming soon"
                         Click="OnSettingsClick">
@@ -241,7 +207,7 @@
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="bg" Property="Background" Value="#22FFFFFF"/>
+                                    <Setter TargetName="bg" Property="Background" Value="{DynamicResource ButtonHoverBg}"/>
                                 </Trigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>
@@ -249,14 +215,13 @@
                     <TextBlock Text="&#xE713;"
                                FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
                                FontSize="14"
-                               Foreground="#C8FFFFFF"/>
+                               Foreground="{DynamicResource SecondaryText}"/>
                 </Button>
 
                 <Button x:Name="CloseButton"
                         Width="28" Height="28"
                         Background="Transparent"
                         BorderThickness="0"
-                        Foreground="#F5FFFFFF"
                         Cursor="Hand"
                         ToolTip="Quit KusPus"
                         Click="OnCloseClick">
@@ -278,7 +243,7 @@
                     <TextBlock Text="&#xE8BB;"
                                FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
                                FontSize="11"
-                               Foreground="#F5FFFFFF"/>
+                               Foreground="{DynamicResource PrimaryText}"/>
                 </Button>
             </StackPanel>
         </Grid>

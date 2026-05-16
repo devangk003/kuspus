@@ -240,20 +240,19 @@ public partial class FloatingPillWindow : Window
             return;
         }
 
-        // §3.1 active-bar token rgba(255,255,255,0.92) → #EBFFFFFF
-        var activeBrush = new WpfSolidColorBrush(WpfColor.FromArgb(0xEB, 0xFF, 0xFF, 0xFF));
-        activeBrush.Freeze();
-
         for (int i = 0; i < BarCount; i++)
         {
             var bar = new WpfRectangle
             {
                 Width = BarWidth,
                 Height = BarMinHeight,
-                Fill = activeBrush,
                 RadiusX = 1.5,
                 RadiusY = 1.5,
             };
+            // SetResourceReference binds Fill to the theme token, so when
+            // ThemeTokens.Apply replaces the brush in Application.Resources the
+            // bars re-fill in the new theme automatically.
+            bar.SetResourceReference(WpfRectangle.FillProperty, "VisualizerBarActive");
             Canvas.SetLeft(bar, i * (BarWidth + BarGap));
             Canvas.SetTop(bar, (TrackHeight - BarMinHeight) / 2);
             VisualizerCanvas.Children.Add(bar);

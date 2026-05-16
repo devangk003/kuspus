@@ -31,6 +31,7 @@ public partial class App : System.Windows.Application
     private AppCoordinator? _coordinator;
     private TrayManager? _tray;
     private FloatingPillWindow? _pill;
+    private MainWindow? _mainWindow;
     private Microsoft.Extensions.Logging.ILogger? _log;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -76,6 +77,12 @@ public partial class App : System.Windows.Application
         _log = _services.GetRequiredService<ILoggerFactory>().CreateLogger("KusPus.App");
         _log.LogInformation("KusPus starting up. Logs at {Path}.", AppPaths.LogsDir);
 
+        // Theme brushes installed before any window is constructed so XAML can
+        // resolve {DynamicResource AppBg} etc. at MainWindow.InitializeComponent.
+        // Apply also handles subsequent replacements when the user flips the theme.
+        var initialMode = ThemeApply.Resolve(_services.GetRequiredService<IPrefsStore>().Current.Ui.Theme);
+        ThemeTokens.Apply(Resources, initialMode);
+
         _coordinator = _services.GetRequiredService<AppCoordinator>();
         _pill = new FloatingPillWindow();
         _pill.SetLogger(_services.GetRequiredService<ILoggerFactory>().CreateLogger<FloatingPillWindow>());
@@ -83,7 +90,20 @@ public partial class App : System.Windows.Application
         _pill.Bind(_coordinator.State);
         _pill.BindLevels(_services.GetRequiredService<IAudioRecorder>().Levels);
 
-        _tray = new TrayManager(_coordinator, Shutdown);
+        // MainWindow is created at startup but stays hidden until the user opens it
+        // via the tray "Preferences…" item. Hides on close — only the tray's Quit
+        // fully exits (APP_DESIGN §3.1 / §8.5).
+        _mainWindow = new MainWindow(
+            _services.GetRequiredService<IPrefsStore>(),
+            _services.GetRequiredService<IHotkeyEngine>(),
+            _services.GetRequiredService<IModelManager>(),
+            _services.GetRequiredService<IHistoryStore>(),
+            _services.GetService<ILogger<MainWindow>>());
+
+        _tray = new TrayManager(
+            _coordinator,
+            onPreferences: () => _mainWindow.ShowOn("general"),
+            onQuit: Shutdown);
 
         _coordinator.Start();
     }
@@ -150,6 +170,9 @@ public partial class App : System.Windows.Application
         _coordinator?.Dispose();
         _tray?.Dispose();
         _pill?.Close();
+        // MainWindow's normal Close behaviour is to hide (per §3.1/§8.5). At app
+        // shutdown we want a real close — ForceClose flips the internal flag.
+        _mainWindow?.ForceClose();
         (_services as IDisposable)?.Dispose();
         _instanceGuard?.Dispose();
         Log.CloseAndFlush();
