@@ -91,6 +91,7 @@ When a gate forces a deliberate deviation from TECH_SPEC's literal text, log it 
 
 - **`src/KusPus.Core/Result.cs`** — TECH_SPEC §10 shows `Result<T>` with static `Ok`/`Fail` factories. Real impl uses a non-generic `Result` helper class with generic methods (`Result.Ok(42)`, `Result.Fail<T>("msg")`). Reason: satisfies analyzer CA1000 + enables type inference at call sites. Spec snippet is intent-level; this is the idiomatic .NET placement.
 - **`Directory.Build.props`** — adds `<NoWarn>CA1707</NoWarn>` for `*.Tests` projects only. Reason: xunit's snake_case test-name convention conflicts with the production-code naming rule. Production code remains under CA1707.
+- **`src/KusPus.Persistence/PrefsStore.cs`** — file-level `#pragma warning disable CA1848, CA1873` (LoggerMessage source-gen delegate analyzers). Reason: PrefsStore logs at startup and on rare validation errors only — never on a hot path. LoggerMessage source-gen would add ~30 lines of boilerplate for ~5 log calls with no measurable benefit at this volume. The rules stay active globally so hot-path classes (HotkeyEngine, Coordinator) still get the signal.
 
 Append to this list (don't replace) when a new deviation lands.
 
