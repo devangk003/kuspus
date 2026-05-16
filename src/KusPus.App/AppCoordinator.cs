@@ -329,6 +329,9 @@ public sealed class AppCoordinator : IDisposable
         _logger.LogInformation(
             "Paste outcome: pasted={Pasted} app={App} error={Error}.",
             outcome.Pasted, outcome.TargetApp, outcome.Error ?? "<none>");
+
+        EmitPostPasteSnapshot(outcome.Pasted, outcome.TargetApp, outcome.Error);
+
         var settingsHistory = _prefs.Current.History;
         if (!settingsHistory.Enabled)
         {
@@ -350,9 +353,26 @@ public sealed class AppCoordinator : IDisposable
         }
     }
 
+    /// <summary>
+    /// Marshals a one-shot post-paste snapshot onto the dispatcher so the pill can
+    /// render Confirmed (1 s) or Error (2 s) per design spec §2.5 / §2.6. The FSM
+    /// itself already transitioned to Idle before this fires; the snapshot rides
+    /// on top of Idle with <see cref="PostPasteInfo"/> attached.
+    /// </summary>
+    private void EmitPostPasteSnapshot(bool pasted, string targetApp, string? error)
+    {
+        var info = new PostPasteInfo(pasted, targetApp, error);
+        _dispatcher.BeginInvoke(new Action(() =>
+        {
+            _state.OnNext(new CoordinatorSnapshot(AppState.Idle, PostPaste: info));
+        }));
+    }
+
     private async Task HandleFailureAsync(string error, string? failedWavPath)
     {
         _logger.LogWarning("Transcription failed: {Error}", error);
+
+        EmitPostPasteSnapshot(pasted: false, targetApp: "?", error: error);
 
         string? retainedPath = null;
         if (failedWavPath is not null && File.Exists(failedWavPath))

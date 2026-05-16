@@ -79,7 +79,9 @@ public partial class App : System.Windows.Application
         _coordinator = _services.GetRequiredService<AppCoordinator>();
         _pill = new FloatingPillWindow();
         _pill.SetLogger(_services.GetRequiredService<ILoggerFactory>().CreateLogger<FloatingPillWindow>());
+        _pill.SetCloseAction(Shutdown);
         _pill.Bind(_coordinator.State);
+        _pill.BindLevels(_services.GetRequiredService<IAudioRecorder>().Levels);
 
         _tray = new TrayManager(_coordinator, Shutdown);
 

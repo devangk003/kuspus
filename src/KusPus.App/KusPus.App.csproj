@@ -8,6 +8,11 @@
     <RootNamespace>KusPus.App</RootNamespace>
     <AssemblyName>KusPus</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Embeds the .ico as the exe's Win32 icon resource — File Explorer,
+         Task Manager, and the taskbar (when pinned) read this. Generated
+         from icons/icon.svg by tools/IconBuilder; re-run that tool if you
+         change the SVG. -->
+    <ApplicationIcon>..\..\icons\icon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,6 +24,7 @@
     <PackageReference Include="Serilog" Version="4.2.0" />
     <PackageReference Include="Serilog.Extensions.Logging" Version="9.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+    <PackageReference Include="SharpVectors.Wpf" Version="1.8.5" />
     <PackageReference Include="System.Reactive" Version="6.0.1" />
   </ItemGroup>
 
@@ -28,6 +34,15 @@
     <ProjectReference Include="..\KusPus.Audio\KusPus.Audio.csproj" />
     <ProjectReference Include="..\KusPus.Whisper\KusPus.Whisper.csproj" />
     <ProjectReference Include="..\KusPus.Persistence\KusPus.Persistence.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Same .ico file, embedded as a WPF Resource so the FloatingPillWindow
+         and TrayManager can load it at runtime via pack URI. -->
+    <Resource Include="..\..\icons\icon.ico" Link="icon.ico" />
+    <!-- Source-of-truth SVG referenced by SharpVectors at runtime for the in-pill
+         Idle icon. Loaded via pack URI so we don't ship a path dependency. -->
+    <Resource Include="..\..\icons\icon.svg" Link="icon.svg" />
   </ItemGroup>
 
 </Project>

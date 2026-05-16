@@ -3,10 +3,10 @@ using WinFormsApp = System.Windows.Forms;
 namespace KusPus.App;
 
 /// <summary>
-/// Tray icon per TECH_SPEC §8.9 + §25. Switched from <c>H.NotifyIcon.Wpf</c> to
-/// <c>System.Windows.Forms.NotifyIcon</c> after Phase 6 manual smoke: H.NotifyIcon
-/// didn't actually surface the tray icon, and the WinForms version is well-trodden
-/// in WPF apps with <c>UseWindowsForms=true</c> alongside <c>UseWPF=true</c>.
+/// Tray icon per TECH_SPEC §8.9 + §25. Uses the bundled icon.ico (generated from
+/// icons/icon.svg by tools/IconBuilder). Switched from H.NotifyIcon.Wpf to
+/// System.Windows.Forms.NotifyIcon during Phase 6 manual smoke — H.NotifyIcon
+/// didn't reliably render on Win 11 25H2.
 /// </summary>
 internal sealed class TrayManager : IDisposable
 {
@@ -16,7 +16,7 @@ internal sealed class TrayManager : IDisposable
     {
         _icon = new WinFormsApp.NotifyIcon
         {
-            Icon = System.Drawing.SystemIcons.Application,
+            Icon = LoadAppIcon(),
             Text = "KusPus",
             Visible = true,
         };
@@ -31,6 +31,23 @@ internal sealed class TrayManager : IDisposable
     public void Dispose()
     {
         _icon.Visible = false;
+        _icon.Icon?.Dispose();
         _icon.Dispose();
+    }
+
+    private static System.Drawing.Icon LoadAppIcon()
+    {
+        // Resolve the WPF Resource icon.ico via pack URI and hand the stream to
+        // System.Drawing.Icon. Keeps the tray, window, and exe icons unified on
+        // a single source-of-truth file.
+        var info = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/icon.ico"));
+        if (info is null)
+        {
+            // Defensive — shouldn't happen because icon.ico is included as a Resource
+            // in KusPus.App.csproj. Fall back to the system app icon so the tray still works.
+            return System.Drawing.SystemIcons.Application;
+        }
+        using var stream = info.Stream;
+        return new System.Drawing.Icon(stream);
     }
 }
