@@ -1,42 +1,36 @@
-using H.NotifyIcon;
-using H.NotifyIcon.Core;
+using WinFormsApp = System.Windows.Forms;
 
 namespace KusPus.App;
 
 /// <summary>
-/// Minimal tray icon per TECH_SPEC §8.9 + §25. Phase 6 ships Quit only; the
-/// "Toggle Recorder", "Active Model", "Preferences", and "History" entries are
-/// Phase 9 / 10 / 11 additions.
+/// Tray icon per TECH_SPEC §8.9 + §25. Switched from <c>H.NotifyIcon.Wpf</c> to
+/// <c>System.Windows.Forms.NotifyIcon</c> after Phase 6 manual smoke: H.NotifyIcon
+/// didn't actually surface the tray icon, and the WinForms version is well-trodden
+/// in WPF apps with <c>UseWindowsForms=true</c> alongside <c>UseWPF=true</c>.
 /// </summary>
 internal sealed class TrayManager : IDisposable
 {
-    private readonly TaskbarIcon _icon;
+    private readonly WinFormsApp.NotifyIcon _icon;
 
     public TrayManager(AppCoordinator coordinator, Action onQuit)
     {
-        _icon = new TaskbarIcon
+        _icon = new WinFormsApp.NotifyIcon
         {
-            ToolTipText = "KusPus",
-            Icon = new System.Drawing.Icon(System.Drawing.SystemIcons.Application, 16, 16),
+            Icon = System.Drawing.SystemIcons.Application,
+            Text = "KusPus",
+            Visible = true,
         };
 
-        var menu = new System.Windows.Controls.ContextMenu();
-
-        var toggle = new System.Windows.Controls.MenuItem { Header = "Toggle Recorder" };
-        toggle.Click += (_, _) => coordinator.ToggleFromTray();
-        menu.Items.Add(toggle);
-
-        menu.Items.Add(new System.Windows.Controls.Separator());
-
-        var quit = new System.Windows.Controls.MenuItem { Header = "Quit" };
-        quit.Click += (_, _) => onQuit();
-        menu.Items.Add(quit);
-
-        _icon.ContextMenu = menu;
+        var menu = new WinFormsApp.ContextMenuStrip();
+        menu.Items.Add("Toggle Recorder", null, (_, _) => coordinator.ToggleFromTray());
+        menu.Items.Add(new WinFormsApp.ToolStripSeparator());
+        menu.Items.Add("Quit", null, (_, _) => onQuit());
+        _icon.ContextMenuStrip = menu;
     }
 
     public void Dispose()
     {
+        _icon.Visible = false;
         _icon.Dispose();
     }
 }

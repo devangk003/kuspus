@@ -52,7 +52,7 @@ public partial class App : System.Windows.Application
 
         Directory.CreateDirectory(AppPaths.LogsDir);
         Log.Logger = new LoggerConfiguration()
-            .MinimumLevel.Information()
+            .MinimumLevel.Debug()
             .WriteTo.File(
                 path: Path.Combine(AppPaths.LogsDir, "kuspus-.log"),
                 rollingInterval: RollingInterval.Day,
@@ -62,7 +62,14 @@ public partial class App : System.Windows.Application
             .CreateLogger();
 
         var services = new ServiceCollection();
-        services.AddLogging(b => b.AddProvider(new SerilogExt.SerilogLoggerProvider(Log.Logger)));
+        services.AddLogging(b =>
+        {
+            // MEL has its OWN minimum-level filter that defaults to Information,
+            // independent of Serilog's MinimumLevel. Without this, LogDebug calls
+            // are filtered out by MEL before Serilog ever sees them.
+            b.SetMinimumLevel(LogLevel.Debug);
+            b.AddProvider(new SerilogExt.SerilogLoggerProvider(Log.Logger));
+        });
         ConfigureServices(services);
         _services = services.BuildServiceProvider();
 
@@ -71,6 +78,7 @@ public partial class App : System.Windows.Application
 
         _coordinator = _services.GetRequiredService<AppCoordinator>();
         _pill = new FloatingPillWindow();
+        _pill.SetLogger(_services.GetRequiredService<ILoggerFactory>().CreateLogger<FloatingPillWindow>());
         _pill.Bind(_coordinator.State);
 
         _tray = new TrayManager(_coordinator, Shutdown);
@@ -108,9 +116,9 @@ public partial class App : System.Windows.Application
                 onProcessStarted: sp.GetRequiredService<IProcessContainer>().Contain,
                 logger: sp.GetService<ILogger<WhisperRunner>>()));
 
-        // Audio
+        // Audio — tempDir from KUSPUS_TEMP_DIR or system %TEMP%.
         services.AddSingleton<IAudioRecorder>(sp =>
-            new AudioRecorder(sp.GetService<ILogger<AudioRecorder>>()));
+            new AudioRecorder(AppPaths.TempDir, sp.GetService<ILogger<AudioRecorder>>()));
 
         // Native — clipboard writer + paste + hotkey
         services.AddSingleton<IClipboardWriter, WpfClipboardWriter>();

@@ -59,6 +59,7 @@ public sealed class AppCoordinator : IDisposable
     private System.Threading.Timer? _holdTimer;
     private IDisposable? _hotkeySub;
     private IDisposable? _prefsSub;
+    private bool _disposed;
 
     public AppCoordinator(
         IHotkeyEngine hotkey,
@@ -87,9 +88,11 @@ public sealed class AppCoordinator : IDisposable
 
     public void Start()
     {
-        // Pick up settings (incl. hold threshold) and react to changes.
+        // PrefsStore.Changes is a BehaviorSubject — it pushes the current value
+        // synchronously on Subscribe. No need to also call OnSettingsChanged manually
+        // (that would fire it twice in immediate succession, and any later runtime save
+        // would re-fire and reset HotkeyEngine state mid-chord).
         _prefsSub = _prefs.Changes.Subscribe(OnSettingsChanged);
-        OnSettingsChanged(_prefs.Current);
 
         _hotkeySub = _hotkey.Events.Subscribe(OnHookEvent);
         _audio.DefaultDeviceChanged += OnAudioDeviceChanged;
@@ -111,6 +114,14 @@ public sealed class AppCoordinator : IDisposable
 
     public void Dispose()
     {
+        // Idempotent: AppCoordinator gets disposed both explicitly from App.OnExit
+        // AND by the DI ServiceProvider when it tears down singletons. Without this
+        // guard, Stop() runs twice and the second call double-disposes subjects.
+        if (_disposed)
+        {
+            return;
+        }
+        _disposed = true;
         Stop();
         _state.Dispose();
     }
@@ -154,24 +165,34 @@ public sealed class AppCoordinator : IDisposable
 
     private void Dispatch(CoordinatorEvent evt)
     {
-        _dispatcher.BeginInvoke(() =>
+        // Async lambda on the dispatcher so we can `await` between effects.
+        // The FSM emits Stop+BeginTranscribe together for Recording → Transcribing;
+        // these MUST be serialised so the wav is fully on disk before whisper reads it.
+        _dispatcher.BeginInvoke(new Action(async () =>
         {
-            var transition = Fsm.Step(_snapshot, evt, _fsmConfig);
-            if (!ReferenceEquals(transition.Next, _snapshot))
+            try
             {
-                _snapshot = transition.Next;
-                _state.OnNext(_snapshot);
+                var transition = Fsm.Step(_snapshot, evt, _fsmConfig);
+                if (!ReferenceEquals(transition.Next, _snapshot))
+                {
+                    _snapshot = transition.Next;
+                    _state.OnNext(_snapshot);
+                }
+                foreach (var effect in transition.Effects)
+                {
+                    await DispatchEffectAsync(effect).ConfigureAwait(true);
+                }
             }
-            foreach (var effect in transition.Effects)
+            catch (Exception ex) when (ex is IOException or InvalidOperationException)
             {
-                DispatchEffect(effect);
+                _logger.LogError(ex, "Error dispatching FSM event {Evt}.", evt.GetType().Name);
             }
-        });
+        }));
     }
 
     // ── FSM side effects → live services ─────────────────────────────────────
 
-    private void DispatchEffect(SideEffect effect)
+    private async Task DispatchEffectAsync(SideEffect effect)
     {
         switch (effect)
         {
@@ -196,14 +217,17 @@ public sealed class AppCoordinator : IDisposable
 
             case StartAudioCapture:
                 _recordingStartedAt = DateTimeOffset.UtcNow;
-                _ = Task.Run(StartAudioCaptureAsync);
+                await StartAudioCaptureAsync().ConfigureAwait(true);
                 break;
 
             case StopAudioCapture:
-                _ = Task.Run(StopAudioCaptureAsync);
+                // MUST complete before BeginTranscribe runs — the wav has to be flushed.
+                await StopAudioCaptureAsync().ConfigureAwait(true);
                 break;
 
             case BeginTranscribe:
+                // Long-running (seconds). Fire-and-forget so subsequent FSM events
+                // (user pressing chord again) aren't blocked by the whisper run.
                 _ = Task.Run(BeginTranscribeAsync);
                 break;
 
@@ -250,22 +274,38 @@ public sealed class AppCoordinator : IDisposable
             return;
         }
 
+        _logger.LogInformation("Beginning transcription of {Wav}.", wav);
+
         var settings = _prefs.Current;
         var modelResult = _models.Resolve(settings.Models.ActiveModelId, settings.Models.CustomModelPath);
         if (!modelResult.Success)
         {
+            _logger.LogWarning("Model resolution failed: {Error}", modelResult.Error);
             Dispatch(new TranscribeFailed(modelResult.Error!, wav));
             return;
         }
 
+        _logger.LogInformation(
+            "Resolved model {Id} at {Path}; spawning whisper.exe.",
+            modelResult.Value!.Descriptor.Id, modelResult.Value!.Path);
+
+        var computeStopwatch = System.Diagnostics.Stopwatch.StartNew();
         var transcribe = await _whisper.TranscribeAsync(wav, modelResult.Value!).ConfigureAwait(false);
+        computeStopwatch.Stop();
+
         if (transcribe.Success)
         {
-            var duration = DateTimeOffset.UtcNow - _recordingStartedAt;
-            Dispatch(new TranscribeComplete(transcribe.Value!, duration, settings.Models.ActiveModelId));
+            var totalDuration = DateTimeOffset.UtcNow - _recordingStartedAt;
+            _logger.LogInformation(
+                "Whisper returned {Chars} chars (compute {ComputeMs}ms, total {TotalSeconds:F1}s since start).",
+                transcribe.Value!.Length,
+                computeStopwatch.ElapsedMilliseconds,
+                totalDuration.TotalSeconds);
+            Dispatch(new TranscribeComplete(transcribe.Value!, totalDuration, settings.Models.ActiveModelId));
         }
         else
         {
+            _logger.LogWarning("Whisper failed: {Error}", transcribe.Error);
             Dispatch(new TranscribeFailed(transcribe.Error!, wav));
         }
     }
@@ -275,6 +315,10 @@ public sealed class AppCoordinator : IDisposable
         string? wav = _pendingWavPath;
         _pendingWavPath = null;
 
+        _logger.LogInformation(
+            "Delivering transcript ({Chars} chars) to HWND {Hwnd}.",
+            text.Length, _capturedHwnd);
+
         if (_capturedHwnd == IntPtr.Zero)
         {
             await AppendHistoryAsync(text, duration, model, "?", TranscriptStatus.Ok, null, HistoryPasteOutcome.ClipboardOnly).ConfigureAwait(false);
@@ -282,6 +326,9 @@ public sealed class AppCoordinator : IDisposable
         }
 
         var outcome = await _paste.DeliverAsync(text, _capturedHwnd).ConfigureAwait(false);
+        _logger.LogInformation(
+            "Paste outcome: pasted={Pasted} app={App} error={Error}.",
+            outcome.Pasted, outcome.TargetApp, outcome.Error ?? "<none>");
         var settingsHistory = _prefs.Current.History;
         if (!settingsHistory.Enabled)
         {

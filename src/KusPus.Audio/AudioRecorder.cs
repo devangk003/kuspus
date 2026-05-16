@@ -10,8 +10,9 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using NAudio.CoreAudioApi;
 using NAudio.CoreAudioApi.Interfaces;
-using NAudio.MediaFoundation;
+using NAudio.Dsp;
 using NAudio.Wave;
+using NAudio.Wave.SampleProviders;
 
 namespace KusPus.Audio;
 
@@ -41,6 +42,7 @@ public sealed class AudioRecorder : IAudioRecorder, IDisposable
     private static readonly WaveFormat TargetFormat =
         new(TargetSampleRate, TargetBitsPerSample, TargetChannels);
 
+    private readonly string _tempDir;
     private readonly ILogger<AudioRecorder> _logger;
     private readonly Subject<float[]> _levels = new();
     private readonly object _stateLock = new();
@@ -49,7 +51,7 @@ public sealed class AudioRecorder : IAudioRecorder, IDisposable
     private DeviceChangeNotifier? _notifier;
     private WasapiCapture? _capture;
     private BufferedWaveProvider? _buffer;
-    private MediaFoundationResampler? _resampler;
+    private SampleToWaveProvider16? _resampler;
     private WaveFileWriter? _writer;
     private Thread? _workerThread;
     private CancellationTokenSource? _stopCts;
@@ -60,8 +62,9 @@ public sealed class AudioRecorder : IAudioRecorder, IDisposable
     private volatile bool _isRecording;
     private volatile bool _hitDurationCap;
 
-    public AudioRecorder(ILogger<AudioRecorder>? logger = null)
+    public AudioRecorder(string? tempDir = null, ILogger<AudioRecorder>? logger = null)
     {
+        _tempDir = tempDir ?? Path.GetTempPath();
         _logger = logger ?? NullLogger<AudioRecorder>.Instance;
     }
 
@@ -88,14 +91,36 @@ public sealed class AudioRecorder : IAudioRecorder, IDisposable
                 {
                     BufferDuration = TimeSpan.FromSeconds(5),
                     DiscardOnBufferOverflow = true,
-                };
-                _resampler = new MediaFoundationResampler(_buffer, TargetFormat)
-                {
-                    ResamplerQuality = 60,
+                    // CRITICAL: default is true, which causes BufferedWaveProvider.Read to
+                    // pad the requested byte count with ZEROS when no source data is buffered.
+                    // That makes the worker write silence at full disk speed (capture is async
+                    // and lags first samples by ~10 ms; without this, every gap becomes silence
+                    // in the WAV). With ReadFully=false the worker correctly sees bytesRead=0,
+                    // sleeps, and lets WASAPI fill the buffer. See NAudio Issue #980.
+                    ReadFully = false,
                 };
 
+                // TECH_SPEC §14 pipeline:
+                //   capture (any source format) → BufferedWaveProvider → ToSampleProvider
+                //   → ToMono (downmix if stereo) → WdlResamplingSampleProvider(16 kHz)
+                //   → SampleToWaveProvider16 (float → int16) → writer
+                //
+                // The WDL pull-based resampler returns 0 samples when the source has
+                // none — unlike MediaFoundationResampler which pads with silence at
+                // full output-buffer rate, blowing out the WAV file by 500× as
+                // observed in Phase 6 smoke. Spec was right; my Phase 4 deviation
+                // to MF was wrong. Reverting.
+                var sampleSource = _buffer.ToSampleProvider();
+                if (_capture.WaveFormat.Channels > 1)
+                {
+                    sampleSource = sampleSource.ToMono();
+                }
+                var resampled = new WdlResamplingSampleProvider(sampleSource, TargetSampleRate);
+                _resampler = new SampleToWaveProvider16(resampled);
+
+                Directory.CreateDirectory(_tempDir);
                 _wavPath = Path.Combine(
-                    Path.GetTempPath(),
+                    _tempDir,
                     $"kuspus-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}.wav");
                 _writer = new WaveFileWriter(_wavPath, TargetFormat);
                 _startedAt = DateTimeOffset.UtcNow;
@@ -108,15 +133,20 @@ public sealed class AudioRecorder : IAudioRecorder, IDisposable
                 _enumerator.RegisterEndpointNotificationCallback(_notifier);
 
                 _stopCts = new CancellationTokenSource();
+
+                // ORDER MATTERS: start the capture FIRST so the worker's CaptureState
+                // check (`_capture.CaptureState != Capturing → break`) doesn't fire
+                // immediately. WasapiCapture.StartRecording transitions the state
+                // asynchronously, but the worker's startup wait below absorbs that.
+                _capture.StartRecording();
+                _isRecording = true;
+
                 _workerThread = new Thread(() => WorkerLoop(_stopCts.Token))
                 {
                     IsBackground = true,
                     Name = "KusPus.AudioRecorder.Worker",
                 };
                 _workerThread.Start();
-
-                _capture.StartRecording();
-                _isRecording = true;
 
                 _logger.LogInformation(
                     "Started recording from {Device} ({Format}) to {Path}.",
@@ -145,13 +175,19 @@ public sealed class AudioRecorder : IAudioRecorder, IDisposable
             try
             {
                 _capture.StopRecording();
-                _stopCts?.Cancel();
 
-                bool joined = _workerThread?.Join(TimeSpan.FromSeconds(2)) ?? true;
+                // Don't cancel the worker's CT yet — the BufferedWaveProvider still has
+                // up to ~5s of source samples that haven't been resampled and written.
+                // The worker has a natural-exit condition (bytesRead <= 0 && CaptureState
+                // != Capturing) that drains the buffer first. Join with a generous
+                // timeout; only cancel if drain doesn't complete in time.
+                bool joined = _workerThread?.Join(TimeSpan.FromSeconds(3)) ?? true;
                 if (!joined)
                 {
                     _logger.LogWarning(
-                        "Audio worker thread did not exit within 2s; proceeding to cleanup anyway.");
+                        "Audio worker did not drain within 3s; cancelling and proceeding.");
+                    _stopCts?.Cancel();
+                    _workerThread?.Join(TimeSpan.FromSeconds(1));
                 }
 
                 var duration = DateTimeOffset.UtcNow - _startedAt;
@@ -198,6 +234,19 @@ public sealed class AudioRecorder : IAudioRecorder, IDisposable
         var stopwatch = Stopwatch.StartNew();
         var lastLevelPost = TimeSpan.Zero;
 
+        // Startup wait: WasapiCapture.StartRecording transitions state asynchronously.
+        // Without this, our first natural-exit check (bytesRead==0 && CaptureState!=Capturing)
+        // would fire instantly on a brief Stopped state and the worker would exit before
+        // any audio arrives. Wait up to 1s for the transition; after that, if capture
+        // never started, the natural exit will fire as designed.
+        var startupWait = Stopwatch.StartNew();
+        while (!ct.IsCancellationRequested
+            && _capture?.CaptureState != CaptureState.Capturing
+            && startupWait.Elapsed < TimeSpan.FromSeconds(1))
+        {
+            Thread.Sleep(5);
+        }
+
         while (!ct.IsCancellationRequested)
         {
             int bytesRead;
@@ -228,6 +277,15 @@ public sealed class AudioRecorder : IAudioRecorder, IDisposable
             {
                 break;
             }
+            catch (IOException ex)
+            {
+                // Disk full mid-recording (TECH_SPEC §8.11 "Disk full"). Don't crash
+                // the app — abort the recording, surface it via DefaultDeviceChanged-
+                // style fallback (coordinator treats this as a transcribe failure).
+                _logger.LogError(ex, "Audio write failed; aborting recording.");
+                try { _capture?.StopRecording(); } catch (COMException) { }
+                break;
+            }
 
             _samplesWritten += bytesRead / BytesPerSample;
 
@@ -239,7 +297,10 @@ public sealed class AudioRecorder : IAudioRecorder, IDisposable
                 lastLevelPost = stopwatch.Elapsed;
             }
 
-            if (_samplesWritten / (long)TargetSampleRate >= MaxRecordingSeconds)
+            // Wall-clock cap (not sample-count). "50 minutes" in the spec means real
+            // time elapsed since recording started, not 50 minutes' worth of perfectly
+            // metered samples. Stopwatch is monotonic and immune to sample-rate drift.
+            if (stopwatch.Elapsed.TotalSeconds >= MaxRecordingSeconds)
             {
                 _logger.LogWarning("Recording exceeded the {Minutes}-minute cap; stopping.", MaxRecordingSeconds / 60);
                 _hitDurationCap = true;
@@ -318,7 +379,9 @@ public sealed class AudioRecorder : IAudioRecorder, IDisposable
     private void Cleanup()
     {
         TryDispose(() => _writer?.Dispose());
-        TryDispose(() => _resampler?.Dispose());
+        // _resampler is an IWaveProvider chain (SampleToWaveProvider16 →
+        // WdlResamplingSampleProvider → SampleProvider wrapper → BufferedWaveProvider).
+        // None of those are IDisposable; releasing the reference is sufficient.
         TryDispose(() => _capture?.Dispose());
         if (_enumerator is not null && _notifier is not null)
         {

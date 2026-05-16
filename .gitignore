@@ -61,3 +61,10 @@ secrets.json
 
 # Claude Code session state (per-user, not for VCS)
 .claude/
+
+# Local model storage (junction target from %LOCALAPPDATA%\KusPus\models on
+# space-constrained machines). 75 MB+ per file — never committed.
+.local-models/
+
+# Audio capture temp files (KUSPUS_TEMP_DIR target on space-constrained machines).
+.local-temp/
