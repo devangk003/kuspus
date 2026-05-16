@@ -46,7 +46,7 @@ public class HotkeyEngineTests
     }
 
     [Fact]
-    public void Releasing_LWin_after_engage_consumes_the_keyup()
+    public void Releasing_LWin_after_engage_passes_keyup_through()
     {
         var engine = new HotkeyEngine();
         engine.ProcessKey(VirtualKey.LeftCtrl, isKeyDown: true);
@@ -54,7 +54,11 @@ public class HotkeyEngineTests
 
         bool consumed = engine.ProcessKey(VirtualKey.LeftWin, isKeyDown: false);
 
-        consumed.Should().BeTrue(because: "LWin-suppression must consume the keyup");
+        consumed.Should().BeFalse(because:
+            "The LWin keyup must reach the OS so its 'Win is held' state clears — " +
+            "otherwise SendInput(Ctrl+V) reads as Win+Ctrl+V and every later " +
+            "keystroke becomes a Win+key system shortcut. The injected Ctrl tap " +
+            "(menu-mask-key idiom) still suppresses the Start menu.");
     }
 
     [Fact]
