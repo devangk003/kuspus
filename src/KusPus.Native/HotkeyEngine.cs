@@ -119,12 +119,24 @@ public sealed class HotkeyEngine : IHotkeyEngine, IDisposable
     {
         lock (_stateLock)
         {
+            // Idempotent: if the chord didn't actually change, preserve held-modifier
+            // state so a runtime settings save (Preferences UI in Phase 9+) doesn't
+            // wipe mid-chord state and leave hold-mode stranded in 'engaged' forever.
+            if (ChordsEqual(_chord, chord))
+            {
+                return;
+            }
             _chord = chord;
             _heldModifiers.Clear();
             _heldChordKey = false;
             _chordEngaged = false;
         }
     }
+
+    private static bool ChordsEqual(HotkeyChord a, HotkeyChord b) =>
+        a.Modifiers.Count == b.Modifiers.Count &&
+        a.Modifiers.All(b.Modifiers.Contains) &&
+        a.Key == b.Key;
 
     public void Dispose()
     {

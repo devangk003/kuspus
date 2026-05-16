@@ -41,4 +41,23 @@ internal static class AppPaths
     /// </summary>
     public static string ExpectedWhisperSha256 =>
         Environment.GetEnvironmentVariable("KUSPUS_WHISPER_SHA256") ?? string.Empty;
+
+    /// <summary>
+    /// Where intermediate <c>.wav</c> files live during recording. Defaults to the
+    /// system <c>%TEMP%</c>; override with <c>KUSPUS_TEMP_DIR</c> when the system
+    /// temp drive is space-constrained.
+    /// </summary>
+    public static string TempDir
+    {
+        get
+        {
+            var dir = Environment.GetEnvironmentVariable("KUSPUS_TEMP_DIR");
+            if (string.IsNullOrEmpty(dir))
+            {
+                return Path.GetTempPath();
+            }
+            Directory.CreateDirectory(dir);
+            return dir;
+        }
+    }
 }
