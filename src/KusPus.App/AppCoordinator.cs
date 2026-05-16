@@ -86,6 +86,13 @@ public sealed class AppCoordinator : IDisposable
     /// <summary>The pill VM binds to this to derive its content from state.</summary>
     public IObservable<CoordinatorSnapshot> State => _state;
 
+    /// <summary>
+    /// Last emitted snapshot — handy when a caller already received an unrelated
+    /// notification (e.g. PrefsStore change) and wants the current FSM state
+    /// without re-subscribing. Mirrors <see cref="IPrefsStore.Current"/>'s shape.
+    /// </summary>
+    public CoordinatorSnapshot Snapshot => _state.Value;
+
     public void Start()
     {
         // PrefsStore.Changes is a BehaviorSubject — it pushes the current value

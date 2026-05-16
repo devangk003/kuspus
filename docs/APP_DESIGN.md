@@ -1352,3 +1352,177 @@ tokens/
 
 
 
+\---
+
+
+
+\## 13. Refinements — UI/UX audit findings
+
+
+
+Source: a full UI/UX audit of the Preferences window against §3 (Main Window) and §1.4 (Type) — see conversation log dated 2026-05-17. This section records the \*\*target behaviour\*\*; the table at the end (\*\*§13.5\*\*) tracks individual fix progress.
+
+
+
+The audit verdict: the window has the right bones — sidebar nav, themed surfaces, mint accent line, system chrome — but it ships as \*\*a collection of one-off styles, not a design system\*\*. §3.4 prescribes four button kinds, badge, dot, row, segmented control, toggle; only Toggle and Segmented exist as styles. Buttons and rows are hand-rolled at every call site. Several controls silently lie about their own state (most notably Crash Reports while Offline Mode is on), and several tabs leak internal-milestone copy ("lands in Phase 11") to the end user.
+
+
+
+\### 13.1 State-dependent control enablement (binding rule)
+
+
+
+When one preference \*\*nullifies\*\* another at runtime, the dependent control must \*\*reflect that nullification visually\*\*. A toggle that shows ON while its underlying behaviour is suppressed elsewhere is a state lie and never acceptable.
+
+
+
+The canonical case:
+
+
+
+\- \*\*Crash Reports vs. Offline Mode.\*\* When Offline Mode is ON, Sentry is shut down regardless of the Crash Reports toggle (TECH\_SPEC §19 "Forced disable"). The Crash Reports toggle must therefore \*\*render disabled\*\* — knob dimmed (~38 % opacity), background `SurfaceElevated`, no hover affordance — and its subtitle must read \*\*`Disabled while Offline Mode is on.`\*\* on a single line, replacing the default subtitle. When Offline Mode flips OFF, the toggle re-enables and the original subtitle returns. The Toggle's `IsChecked` value is preserved across the disable cycle so the user's intent isn't silently lost.
+
+
+
+The same rule generalises to any future "requires internet" control (per-model download, opt-in analytics, etc.): if Offline Mode would gate the behaviour, the control disables and its subtitle explains why.
+
+
+
+\### 13.2 Copy guidelines for the Main Window
+
+
+
+\- \*\*No internal phase numbers in user-facing strings.\*\* "Lands in Phase 11", "Wiring lands in a follow-up cluster", "Phase 10 onboarding" — none of these belong in the shipped UI. Either implement the feature, or hide the row/section that would have advertised it. A permanently-disabled-but-explained row is worse UX than no row at all.
+
+\- \*\*No Win32 / registry / API jargon in subtitles.\*\* "Adds a HKCU\Run entry" is a developer's note, not user copy. Rewrite in terms of user-observable outcome: \*\*`Starts KusPus when you sign in to Windows.`\*\* The tray-always-available reassurance becomes a second sentence in the same subtitle: \*\*`The tray icon stays available either way.`\*\*
+
+\- \*\*Telemetry copy stays plain.\*\* The Crash Reports row's subtitle is \*\*`Anonymous, opt-in. Never includes transcripts, audio, or clipboard contents.`\*\* — slightly tighter than the v1 wording, retains the same promise.
+
+
+
+\### 13.3 Sidebar footer — live state binding contract
+
+
+
+The 200 px sidebar's bottom row is a \*\*live status indicator\*\*, not decoration. It binds to two sources:
+
+
+
+| Element | Source | Update trigger |
+
+|---|---|---|
+
+| Mint dot + status label (`Idle · {model}`) | `AppCoordinator.State` snapshot + `IPrefsStore.Current.Models.ActiveModelId` | On any coordinator state transition; on settings change |
+
+| Hotkey glyph (mono, right-aligned) | `IPrefsStore.Current.Hotkey` | On settings change |
+
+
+
+\- Status text format: `{State} · {ModelDisplayName}` where `State` ∈ `{Idle, Recording, Transcribing, Confirmed, Error}` and `ModelDisplayName` is the short form (e.g. `tiny.en`, `base.en`, `custom`).
+
+\- Hotkey glyph format: \*\*compact text, not platform symbol soup\*\*. The Unicode `⌃⊞` placeholder is replaced by the joined `FriendlyKey` shorthand of the current chord (e.g. `Ctrl+Win`, `Ctrl+Alt+Space`). Mono font, MutedText colour.
+
+\- A stale or hardcoded footer is a bug: the footer changes whenever the underlying value changes, with no exception.
+
+
+
+\### 13.4 Inline keycap inside helper text
+
+
+
+When helper text references a keyboard key (`ESC to cancel`, `Press Enter`), the key glyph is rendered \*\*inline\*\* as a small mono Keycap (same visual language as §3.4 Keycap, scaled down):
+
+
+
+\- Padding 1 × 5 px, 4 px corner radius, `KeycapBg` background, `KeycapBorder` 1 px border.
+
+\- Font: `Cascadia Mono` 10.5 px / 500.
+
+\- Inline using WPF `Run` + `InlineUIContainer`, baseline-aligned to the surrounding `MutedText`.
+
+
+
+Applied first in: hotkey-picker listen-mode hint (`Now press the keys you want to use… [ESC] to cancel`).
+
+
+
+\### 13.5 Audit findings — progress ledger
+
+
+
+\*\*Priority key.\*\* P0 = ship-blocker (broken logic, contrast failure, state lie). P1 = design-system gap or spec deviation. P2 = polish.
+
+
+
+\*\*Status key.\*\* `todo` · `wip` · `done` · `deferred`.
+
+
+
+| ID | P | Title | File (audit reference) | Status |
+
+|---|---|---|---|---|
+
+| P0-1 | P0 | Crash Reports gated by Offline Mode (§13.1) | `MainWindow.xaml:569-604` + `CrashReporter.cs:88-100` | done |
+
+| P0-2 | P0 | Replace stale "Phase X" + Win32 copy (§13.2) | `MainWindow.xaml:344, 418, 485, 527, 752` | done |
+
+| P0-3 | P0 | Raise `DisabledText` contrast to ≥ 4.5:1 | `ThemeTokens.cs:40` | todo |
+
+| P0-4 | P0 | Sidebar footer live binding (§13.3) | `MainWindow.xaml:233-246` | done |
+
+| P0-5 | P0 | Audio tab mic-active privacy disclosure | `MainWindow.xaml.cs:692-738` | todo |
+
+| P1-1 | P1 | Button styles (primary / secondary / ghost / danger × sm/md/lg) — replace 5 inline-styled call sites | `Styles/Buttons.xaml` (new) + `MainWindow.xaml:491,616,697,729,758` | todo |
+
+| P1-2 | P1 | History search bar + bulk footer + purge-all flow | `MainWindow.xaml:534-544` | todo |
+
+| P1-3 | P1 | Privacy Logs size row + Clear logs ghost-danger button | `MainWindow.xaml:607-625` | todo |
+
+| P1-4 | P1 | Models tab download flow for non-installed entries | `MainWindow.xaml.cs:853-930` | todo |
+
+| P1-5 | P1 | Migrate Models + History row rendering to DataTemplates (remove `Theme()` brush resolver) | `MainWindow.xaml.cs:385-386, 873-906` | todo |
+
+| P1-6 | P1 | Typography style set (`SectionHeader`, `RowTitle`, `RowSubtitle`, `Eyebrow`, `KeyMono`, `BodySmall`) replacing ~40 inline triplets | `Styles/Typography.xaml` (new) | todo |
+
+| P1-7 | P1 | `StatusDot` style replacing 6 hand-rolled Ellipses | `Styles/Dot.xaml` (new) | todo |
+
+| P1-8 | P1 | Section gap rhythm — drop negative margins, use one vertical spacing scale | `MainWindow.xaml:299-329` | todo |
+
+| P1-9 | P1 | Keyboard focus visuals on sidebar tabs, segments, toggles, buttons | `MainWindow.xaml` Style blocks | todo |
+
+| P1-10 | P1 | Extract per-tab `UserControl`s (`GeneralView`, `AudioView`, …) per TECH\_SPEC §22 | `Views/*.xaml` (new) | todo |
+
+| P2-1 | P2 | Copy: "HKCU\Run entry" → user-language rewrite (§13.2) | `MainWindow.xaml:344` | done |
+
+| P2-2 | P2 | Copy: Crash Reports subtitle (§13.2) | `MainWindow.xaml:591-596` | done |
+
+| P2-3 | P2 | Local-first headline → existing type role (drop 14/SemiBold) | `MainWindow.xaml:633-637` | todo |
+
+| P2-4 | P2 | Inline `[ESC]` keycap in hotkey-listen hint (§13.4) | `MainWindow.xaml.cs:417` | done |
+
+| P2-5 | P2 | Reflow ConflictRow inside Hotkey StackPanel — drop negative margin tuck | `MainWindow.xaml:307` | todo |
+
+| P2-6 | P2 | Bump `HoverSubtle` brush to 8–10 % so sidebar hover is visible | `ThemeTokens.cs:43` | todo |
+
+| P2-7 | P2 | Verify GitHub repo URL exists at the case in About tab | `MainWindow.xaml:691` | todo |
+
+| P2-8 | P2 | Delete unreachable `(none)` empty-state branch on Models tab | `MainWindow.xaml.cs:839-841` | todo |
+
+| P2-9 | P2 | Empty-state for History search-with-zero-results | `MainWindow.xaml.cs:1015-1026` | todo |
+
+| P2-10 | P2 | De-duplicate "Open in Explorer" (Privacy ↔ About) | `MainWindow.xaml:616-623, 729-736` | todo |
+
+
+
+Work waves (smaller-first, mergeable):
+
+
+
+1\. \*\*W1 — "stop lying":\*\* P0-1, P0-2, P0-4, P2-1, P2-2, P2-4. Highest user-trust impact; pure copy + state-binding work, no new components.
+
+2\. \*\*W2 — "design system":\*\* P1-1, P1-6, P1-7, P1-8, P1-9, P1-10. Extract reusable styles + per-tab UserControls. Every later edit becomes half as long.
+
+3\. \*\*W3 — "ship the missing UX":\*\* P0-3, P0-5, P1-2, P1-3, P1-4. Brings the window into spec-completeness — model downloads, log size + clear, history search + purge, mic disclosure.
+
+
+

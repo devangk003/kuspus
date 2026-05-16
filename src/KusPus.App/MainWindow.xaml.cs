@@ -4,12 +4,14 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using KusPus.Core.Hotkeys;
 using KusPus.Core.Settings;
+using KusPus.Core.State;
 using KusPus.Native;
 using KusPus.Persistence;
 using KusPus.Whisper;
@@ -50,10 +52,12 @@ public partial class MainWindow : Window
     private readonly IHotkeyEngine _hotkey;
     private readonly IModelManager _models;
     private readonly IHistoryStore _history;
+    private readonly AppCoordinator _coordinator;
     private readonly ILogger<MainWindow> _logger;
     private bool _loaded;
     private bool _allowClose;
     private IDisposable? _prefsSubscription;
+    private IDisposable? _coordinatorSubscription;
     private bool _modelsRendered;
     private bool _historyRendered;
 
@@ -85,12 +89,14 @@ public partial class MainWindow : Window
         IHotkeyEngine hotkey,
         IModelManager models,
         IHistoryStore history,
+        AppCoordinator coordinator,
         ILogger<MainWindow>? logger = null)
     {
         _prefs = prefs;
         _hotkey = hotkey;
         _models = models;
         _history = history;
+        _coordinator = coordinator;
         _logger = logger ?? NullLogger<MainWindow>.Instance;
         InitializeComponent();
         SourceInitialized += OnSourceInitialized;
@@ -147,11 +153,18 @@ public partial class MainWindow : Window
         };
         themeButton.IsChecked = true;
 
-        // Privacy tab initial state (9H).
+        // Privacy tab initial state (9H + 13.1).
         OfflineToggle.IsChecked = s.Privacy.OfflineMode;
         CrashReportsToggle.IsChecked = s.Privacy.CrashReportsOptIn;
         UpdateOfflineSubtitle(s.Privacy.OfflineMode);
+        ApplyCrashReportsGating(s.Privacy.OfflineMode);
         LogsPath.Text = AppPaths.LogsDir;
+
+        // Sidebar footer live state (§13.3) — initial paint from current settings +
+        // coordinator snapshot. Updates wired below via PrefsStore.Changes +
+        // AppCoordinator.State.
+        UpdateSidebarHotkey(s.Hotkey);
+        UpdateSidebarStatus(AppState.Idle, s.Models.ActiveModelId);
 
         // About tab (9I) — assembly metadata + log path. Build-date/Git-SHA stamping
         // is set up by Phase 12's release pipeline; until then we fall back to the
@@ -186,6 +199,11 @@ public partial class MainWindow : Window
                 }
                 // Re-render code-built rows so they pull fresh brushes from Resources.
                 ApplyHotkeyDisplay(settings.Hotkey);
+                // §13.3 sidebar live binding — chord rebind + model swap re-render.
+                UpdateSidebarHotkey(settings.Hotkey);
+                UpdateSidebarStatus(_coordinator.Snapshot.State, settings.Models.ActiveModelId);
+                // §13.1 Crash Reports gating must re-evaluate whenever Offline Mode flips.
+                ApplyCrashReportsGating(settings.Privacy.OfflineMode);
                 if (ContentModels.Visibility == Visibility.Visible)
                 {
                     _modelsRendered = false;
@@ -197,6 +215,16 @@ public partial class MainWindow : Window
                     _ = RenderHistoryTabAsync();
                 }
             });
+        });
+
+        // §13.3 sidebar status label — bound to AppCoordinator state snapshots.
+        // Subscription marshalled to the dispatcher; coordinator emits on the
+        // UI thread already (per AppCoordinator's threading model) but BeginInvoke
+        // is cheap insurance and keeps the call site symmetric with PrefsStore.
+        _coordinatorSubscription = _coordinator.State.Subscribe(snapshot =>
+        {
+            Dispatcher.BeginInvoke(() =>
+                UpdateSidebarStatus(snapshot.State, _prefs.Current.Models.ActiveModelId));
         });
     }
 
@@ -213,6 +241,8 @@ public partial class MainWindow : Window
         {
             _prefsSubscription?.Dispose();
             _prefsSubscription = null;
+            _coordinatorSubscription?.Dispose();
+            _coordinatorSubscription = null;
             return;
         }
         // §3.1 / §8.5: close hides; only the tray's Quit fully exits.
@@ -414,8 +444,8 @@ public partial class MainWindow : Window
 
         HotkeyListenBorder.Visibility = Visibility.Visible;
         HotkeyEyebrow.Foreground = Theme("Mint");
-        HotkeyHint.Text = "Now press the keys you want to use… (ESC to cancel)";
         HotkeyHint.Foreground = Theme("SecondaryText");
+        RenderListeningHint();
         ConflictRow.Visibility = Visibility.Collapsed;
         RenderKeycaps(Array.Empty<CoreVK>());
 
@@ -444,8 +474,40 @@ public partial class MainWindow : Window
         _pressedOrder.Clear();
         HotkeyListenBorder.Visibility = Visibility.Collapsed;
         HotkeyEyebrow.Foreground = Theme("MutedText");
-        HotkeyHint.Text = "Tap the picker, then press a new chord.";
+        // Restore the resting hint with literal text — no keycap needed here since
+        // the rest message references no specific key.
+        HotkeyHint.Inlines.Clear();
+        HotkeyHint.Inlines.Add(new Run("Tap the picker, then press a new chord."));
         HotkeyHint.Foreground = Theme("DisabledText");
+    }
+
+    // §13.4 — inline keycap inside helper text. Builds:
+    //   "Now press the keys you want to use… [ESC] to cancel"
+    // where [ESC] is a mini Keycap (Cascadia Mono + KeycapBg). Implemented via
+    // WPF Inline + InlineUIContainer so the keycap sits on the same baseline as
+    // the surrounding muted text. Re-builds whenever listen mode is (re-)entered.
+    private void RenderListeningHint()
+    {
+        HotkeyHint.Inlines.Clear();
+        HotkeyHint.Inlines.Add(new Run("Now press the keys you want to use… "));
+        var keycap = new Border
+        {
+            Background = Theme("KeycapBg"),
+            BorderBrush = Theme("KeycapBorder"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(5, 1, 5, 1),
+            Child = new TextBlock
+            {
+                Text = "ESC",
+                FontFamily = new WpfFontFamily("Cascadia Mono, Consolas, monospace"),
+                FontSize = 10.5,
+                FontWeight = FontWeights.Medium,
+                Foreground = Theme("PrimaryText"),
+            },
+        };
+        HotkeyHint.Inlines.Add(new InlineUIContainer(keycap) { BaselineAlignment = BaselineAlignment.Center });
+        HotkeyHint.Inlines.Add(new Run(" to cancel"));
     }
 
     private void OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
@@ -1155,7 +1217,7 @@ public partial class MainWindow : Window
         }
         var next = current with { Privacy = current.Privacy with { OfflineMode = enabled } };
 #pragma warning disable CA1848, CA1873
-        _logger.LogInformation("Offline mode → {Value}. (Egress killswitch handler lands in Phase 11.)", enabled);
+        _logger.LogInformation("Offline mode → {Value}.", enabled);
 #pragma warning restore CA1848, CA1873
         UpdateOfflineSubtitle(enabled);
         try
@@ -1184,7 +1246,7 @@ public partial class MainWindow : Window
         }
         var next = current with { Privacy = current.Privacy with { CrashReportsOptIn = enabled } };
 #pragma warning disable CA1848, CA1873
-        _logger.LogInformation("Crash reports → {Value}. (Sentry init lands in Phase 11.)", enabled);
+        _logger.LogInformation("Crash reports → {Value}.", enabled);
 #pragma warning restore CA1848, CA1873
         try
         {
@@ -1204,6 +1266,78 @@ public partial class MainWindow : Window
             ? "Killswitch enabled — no network requests will be made."
             : "KusPus may reach model and crash-report servers when needed.";
     }
+
+    // §13.1 — Crash Reports state-dependent enablement. When Offline Mode is ON,
+    // CrashReporter.ApplySettings shuts Sentry down regardless of this toggle, so
+    // the toggle has to render disabled and the subtitle must explain why.
+    // CrashReportsToggle.IsChecked is preserved across the disable cycle: a user
+    // who opts in but turns on Offline Mode sees their intent honored when they
+    // later turn Offline back off.
+    private void ApplyCrashReportsGating(bool offlineModeOn)
+    {
+        CrashReportsToggle.IsEnabled = !offlineModeOn;
+        CrashReportsToggle.Opacity = offlineModeOn ? 0.5 : 1.0;
+        CrashReportsSubtitle.Text = offlineModeOn
+            ? "Disabled while Offline Mode is on."
+            : "Anonymous, opt-in. Never includes transcripts, audio, or clipboard contents.";
+    }
+
+    // §13.3 — Sidebar status row binding. Updates the "Idle · tiny.en" label from
+    // a coordinator state + an active model id. The active model id arrives from
+    // PrefsStore as "ggml-tiny.en"; the sidebar shows the spec's short form
+    // ("tiny.en") so the line stays compact at 200 px sidebar width.
+    private void UpdateSidebarStatus(AppState state, string activeModelId)
+    {
+        string stateLabel = state switch
+        {
+            AppState.Idle => "Idle",
+            AppState.Armed => "Armed",
+            AppState.Recording => "Recording",
+            AppState.Transcribing => "Transcribing",
+            AppState.Cancelled => "Idle",
+            _ => "Idle",
+        };
+        string modelShort = activeModelId.StartsWith("ggml-", StringComparison.Ordinal)
+            ? activeModelId["ggml-".Length..]
+            : activeModelId;
+        StatusLabel.Text = $"{stateLabel} · {modelShort}";
+    }
+
+    // §13.3 — Sidebar hotkey glyph. Compact text form of the current chord
+    // (e.g. "Ctrl+Win", "Ctrl+Alt+Space"). Survives a chord rebind because
+    // PrefsStore.Changes calls this. Modifiers come first in the spec's order.
+    private void UpdateSidebarHotkey(HotkeySettings hk)
+    {
+        if (hk.Modifiers.Count == 0 && hk.KeyCode is null)
+        {
+            SidebarHotkeyGlyph.Text = "—";
+            return;
+        }
+        var parts = new List<string>(hk.Modifiers.Count + 1);
+        foreach (var m in hk.Modifiers)
+        {
+            parts.Add(ShortKey(m));
+        }
+        if (hk.KeyCode is { } k)
+        {
+            parts.Add(ShortKey(k));
+        }
+        SidebarHotkeyGlyph.Text = string.Join("+", parts);
+    }
+
+    private static string ShortKey(CoreVK k) => k switch
+    {
+        CoreVK.LeftCtrl or CoreVK.RightCtrl or CoreVK.Control => "Ctrl",
+        CoreVK.LeftWin or CoreVK.RightWin => "Win",
+        CoreVK.LeftAlt or CoreVK.RightAlt or CoreVK.Alt => "Alt",
+        CoreVK.LeftShift or CoreVK.RightShift or CoreVK.Shift => "Shift",
+        CoreVK.Space => "Space",
+        CoreVK.Return => "Enter",
+        CoreVK.Tab => "Tab",
+        CoreVK.Escape => "Esc",
+        CoreVK.Backspace => "Bksp",
+        _ => k.ToString(),
+    };
 
     private void OnOpenLogsClick(object sender, RoutedEventArgs e)
     {

@@ -32,6 +32,7 @@ public partial class App : System.Windows.Application
     private TrayManager? _tray;
     private FloatingPillWindow? _pill;
     private MainWindow? _mainWindow;
+    private CrashReporter? _crashReporter;
     private Microsoft.Extensions.Logging.ILogger? _log;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -83,6 +84,13 @@ public partial class App : System.Windows.Application
         var initialMode = ThemeApply.Resolve(_services.GetRequiredService<IPrefsStore>().Current.Ui.Theme);
         ThemeTokens.Apply(Resources, initialMode);
 
+        // Crash reporter — listens to Privacy toggles via PrefsStore.Changes and
+        // initialises / tears down Sentry accordingly. Started before the coordinator
+        // so a startup failure in any later wire-up still ships a scrubbed report
+        // when the user has opted in.
+        _crashReporter = _services.GetRequiredService<CrashReporter>();
+        _crashReporter.Start();
+
         _coordinator = _services.GetRequiredService<AppCoordinator>();
         _pill = new FloatingPillWindow();
         _pill.SetLogger(_services.GetRequiredService<ILoggerFactory>().CreateLogger<FloatingPillWindow>());
@@ -98,6 +106,7 @@ public partial class App : System.Windows.Application
             _services.GetRequiredService<IHotkeyEngine>(),
             _services.GetRequiredService<IModelManager>(),
             _services.GetRequiredService<IHistoryStore>(),
+            _coordinator,
             _services.GetService<ILogger<MainWindow>>());
 
         _tray = new TrayManager(
@@ -137,8 +146,20 @@ public partial class App : System.Windows.Application
                 AppPaths.HistoryDbPath,
                 sp.GetService<ILogger<HistoryStore>>()));
 
-        // Networking — Phase 11 will wrap the HttpClient with the egress-allowlist handler.
-        services.AddSingleton(_ => new HttpClient());
+        // Networking — every outbound request goes through EgressAllowlistHandler so
+        // Offline Mode ON / non-allowlisted host produces a blocked HttpRequestException
+        // instead of hitting the network. See PRD §10.2 + TECH_SPEC §19. HttpClient owns
+        // the handler chain; ServiceProvider disposal at OnExit disposes the singleton.
+        services.AddSingleton(sp =>
+        {
+            var handler = new EgressAllowlistHandler(
+                sp.GetRequiredService<IPrefsStore>(),
+                sp.GetService<ILogger<EgressAllowlistHandler>>())
+            {
+                InnerHandler = new SocketsHttpHandler(),
+            };
+            return new HttpClient(handler);
+        });
 
         // Whisper
         services.AddSingleton<IModelManager>(sp =>
@@ -168,6 +189,13 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IHotkeyEngine>(sp =>
             new HotkeyEngine(sp.GetService<ILogger<HotkeyEngine>>()));
 
+        // Crash reporter (Phase 11) — opt-in Sentry, gated on (CrashReportsOptIn && !OfflineMode).
+        // Takes the ILoggerFactory (not just ILogger<CrashReporter>) so it can build
+        // a logger for the EgressAllowlistHandler it constructs for Sentry's transport.
+        services.AddSingleton(sp => new CrashReporter(
+            sp.GetRequiredService<IPrefsStore>(),
+            sp.GetService<ILoggerFactory>()));
+
         // Coordinator
         services.AddSingleton(sp => new AppCoordinator(
             sp.GetRequiredService<IHotkeyEngine>(),
@@ -184,6 +212,7 @@ public partial class App : System.Windows.Application
     protected override void OnExit(ExitEventArgs e)
     {
         _log?.LogInformation("KusPus shutting down.");
+        _crashReporter?.Dispose();
         _coordinator?.Dispose();
         _tray?.Dispose();
         _pill?.Close();

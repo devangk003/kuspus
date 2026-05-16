@@ -232,14 +232,15 @@
                     </Ellipse>
                     <TextBlock x:Name="StatusLabel"
                                Grid.Column="1"
-                               Text="Idle · tiny.en"
+                               Text="—"
                                Foreground="{DynamicResource MutedText}"
                                FontFamily="Segoe UI Variable Text, Segoe UI"
                                FontSize="11"
                                Margin="8,0,0,0"
                                VerticalAlignment="Center"/>
-                    <TextBlock Grid.Column="2"
-                               Text="⌃⊞"
+                    <TextBlock x:Name="SidebarHotkeyGlyph"
+                               Grid.Column="2"
+                               Text="—"
                                FontFamily="Cascadia Mono, Consolas, monospace"
                                FontSize="11"
                                Foreground="{DynamicResource MutedText}"
@@ -341,10 +342,11 @@
                                            FontSize="13"
                                            FontWeight="Medium"
                                            Foreground="{DynamicResource PrimaryText}"/>
-                                <TextBlock Text="Adds a HKCU\Run entry. Tray menu always available either way."
+                                <TextBlock Text="Starts KusPus when you sign in to Windows. The tray icon stays available either way."
                                            FontFamily="Segoe UI Variable Text, Segoe UI"
                                            FontSize="11.5"
                                            Foreground="{DynamicResource MutedText}"
+                                           TextWrapping="Wrap"
                                            Margin="0,3,0,0"/>
                             </StackPanel>
                             <CheckBox Grid.Column="1"
@@ -415,10 +417,11 @@
                                        FontSize="13"
                                        FontWeight="Medium"
                                        Foreground="{DynamicResource PrimaryText}"/>
-                            <TextBlock Text="Default capture device. Picker UI lands in a follow-up cluster."
+                            <TextBlock Text="Default capture device. Follows your Windows microphone selection."
                                        FontFamily="Segoe UI Variable Text, Segoe UI"
                                        FontSize="11.5"
                                        Foreground="{DynamicResource MutedText}"
+                                       TextWrapping="Wrap"
                                        Margin="0,3,0,0"/>
                         </StackPanel>
                     </Border>
@@ -436,10 +439,11 @@
                                            FontSize="13"
                                            FontWeight="Medium"
                                            Foreground="{DynamicResource PrimaryText}"/>
-                                <TextBlock Text="Bars react to the default capture device when this tab is open."
+                                <TextBlock Text="Active only while this tab is open. Audio is never recorded."
                                            FontFamily="Segoe UI Variable Text, Segoe UI"
                                            FontSize="11.5"
                                            Foreground="{DynamicResource MutedText}"
+                                           TextWrapping="Wrap"
                                            Margin="0,3,0,0"/>
                             </StackPanel>
                             <!-- Discord-style level meter: gray placeholder track + mint
@@ -469,35 +473,10 @@
                         </Grid>
                     </Border>
 
-                    <TextBlock Style="{StaticResource SectionHeader}" Text="Test transcription"/>
-                    <Border Style="{StaticResource RowCard}">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="0">
-                                <TextBlock Text="5-second sample"
-                                           FontFamily="Segoe UI Variable Text, Segoe UI"
-                                           FontSize="13"
-                                           FontWeight="Medium"
-                                           Foreground="{DynamicResource PrimaryText}"/>
-                                <TextBlock Text="Records 5 s, transcribes, shows the result inline. Wiring lands in a follow-up cluster."
-                                           FontFamily="Segoe UI Variable Text, Segoe UI"
-                                           FontSize="11.5"
-                                           Foreground="{DynamicResource MutedText}"
-                                           Margin="0,3,0,0"/>
-                            </StackPanel>
-                            <Button Grid.Column="1"
-                                    Content="Test"
-                                    IsEnabled="False"
-                                    Padding="14,7"
-                                    Background="{DynamicResource SurfaceElevated}"
-                                    Foreground="{DynamicResource DisabledText}"
-                                    BorderThickness="0"
-                                    VerticalAlignment="Center"/>
-                        </Grid>
-                    </Border>
+                    <!-- "Test transcription" section removed per APP_DESIGN §13.5 (P0-2):
+                         the Test button was permanently disabled with a "lands later"
+                         note; per §13.2, deferred features hide their UI rather than
+                         ship a promise-with-no-affordance. Restore in W3 when wired. -->
                 </StackPanel>
 
                 <!-- ── Models tab ───────────────────────────────────────── -->
@@ -524,10 +503,11 @@
                     <TextBlock Style="{StaticResource SectionHeader}" Text="Available models"/>
                     <StackPanel x:Name="ModelsList" Margin="0,0,0,12"/>
                     <TextBlock x:Name="ModelsHint"
-                               Text="Tap an installed model to activate. Downloading more models lands in Phase 11."
+                               Text="Tap an installed model to activate. The bundled tiny model ships with KusPus."
                                FontFamily="Segoe UI Variable Text, Segoe UI"
                                FontSize="11.5"
                                Foreground="{DynamicResource MutedText}"
+                               TextWrapping="Wrap"
                                FontStyle="Italic"/>
                 </StackPanel>
 
@@ -588,7 +568,8 @@
                                            FontSize="13"
                                            FontWeight="Medium"
                                            Foreground="{DynamicResource PrimaryText}"/>
-                                <TextBlock Text="No transcript text, audio, or clipboard contents are ever sent."
+                                <TextBlock x:Name="CrashReportsSubtitle"
+                                           Text="Anonymous, opt-in. Never includes transcripts, audio, or clipboard contents."
                                            FontFamily="Segoe UI Variable Text, Segoe UI"
                                            FontSize="11.5"
                                            Foreground="{DynamicResource MutedText}"
@@ -749,10 +730,11 @@
                                            FontSize="13"
                                            FontWeight="Medium"
                                            Foreground="{DynamicResource PrimaryText}"/>
-                                <TextBlock Text="Walks through the 7-step first-launch flow again. Wiring lands in Phase 10."
+                                <TextBlock Text="Walks through the 7-step first-launch flow again."
                                            FontFamily="Segoe UI Variable Text, Segoe UI"
                                            FontSize="11.5"
                                            Foreground="{DynamicResource MutedText}"
+                                           TextWrapping="Wrap"
                                            Margin="0,3,0,0"/>
                             </StackPanel>
                             <Button Grid.Column="1"
