@@ -238,6 +238,20 @@ public sealed class WhisperRunner : IWhisperRunner, IDisposable
                     : Result.Fail<bool>(IntegrityFailureMessage);
             }
 
+            // Dev mode: empty expected SHA means "trust the binary without verification."
+            // Phase 12 (installer) populates the SHA from the build manifest; until then
+            // this lets developers point at a freshly-built whisper.exe without manually
+            // computing its hash. Logged in CLAUDE.md.
+            if (string.IsNullOrEmpty(_expectedWhisperSha256))
+            {
+                _logger.LogWarning(
+                    "whisper.exe integrity check skipped — no expected SHA configured. " +
+                    "Phase 12 release builds will set this from the build manifest.");
+                _integrityPassed = true;
+                _integrityChecked = true;
+                return Result.Ok(true);
+            }
+
             var actual = await ComputeSha256Async(_whisperExePath, ct).ConfigureAwait(false);
             _integrityPassed = string.Equals(
                 actual, _expectedWhisperSha256, StringComparison.OrdinalIgnoreCase);
