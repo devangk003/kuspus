@@ -1242,6 +1242,15 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnRerunOnboardingClick(object sender, RoutedEventArgs e)
+    {
+        var window = new OnboardingWindow(_prefs, _hotkey)
+        {
+            Owner = this,
+        };
+        window.ShowDialog();
+    }
+
     // ── Setting writes ──────────────────────────────────────────────────────
 
     private async void OnAutostartChanged(object sender, RoutedEventArgs e)

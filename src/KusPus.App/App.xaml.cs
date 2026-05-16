@@ -106,6 +106,23 @@ public partial class App : System.Windows.Application
             onQuit: Shutdown);
 
         _coordinator.Start();
+
+        // First-launch onboarding. Queued with Background priority so OnStartup
+        // returns first and the message loop is fully running before the modal's
+        // nested dispatcher frame begins. Skip-on-skip semantics: Onboarding.Completed
+        // stays false until the user actually Finishes, so closing the modal early
+        // brings it back on the next launch (re-runnable via About → "Run again").
+        if (!_services.GetRequiredService<IPrefsStore>().Current.Onboarding.Completed)
+        {
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+            {
+                var window = new OnboardingWindow(
+                    _services.GetRequiredService<IPrefsStore>(),
+                    _services.GetRequiredService<IHotkeyEngine>(),
+                    _services.GetService<ILogger<OnboardingWindow>>());
+                window.ShowDialog();
+            }));
+        }
     }
 
     private static void ConfigureServices(IServiceCollection services)

@@ -757,10 +757,10 @@
                             </StackPanel>
                             <Button Grid.Column="1"
                                     Content="Run again"
-                                    IsEnabled="False"
+                                    Click="OnRerunOnboardingClick"
                                     Padding="14,7"
                                     Background="{DynamicResource SurfaceElevated}"
-                                    Foreground="{DynamicResource DisabledText}"
+                                    Foreground="{DynamicResource PrimaryText}"
                                     BorderThickness="0"
                                     VerticalAlignment="Center"/>
                         </Grid>
