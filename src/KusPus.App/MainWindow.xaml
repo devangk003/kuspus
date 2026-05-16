@@ -17,6 +17,9 @@
         Closing hides the window (§3.1) — quit only via tray.
         All colours are DynamicResource brushes registered by ThemeTokens — the
         ThemeService flips brush.Color when the user changes the Appearance pref.
+        Typography styles (SectionHeader, Type.RowTitle, Type.RowSubtitle,
+        Type.Eyebrow, Type.MonoSm, Type.Display) live in Styles/Typography.xaml
+        per APP_DESIGN §13.5 (P1-6).
     -->
     <Window.Resources>
         <!-- ── Sidebar tab button (RadioButton restyled per §3.2) ─────────── -->
@@ -24,6 +27,7 @@
             <Setter Property="Margin" Value="0,1"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Foreground" Value="{DynamicResource SecondaryText}"/>
+            <Setter Property="FocusVisualStyle" Value="{DynamicResource Focus.Mint}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="RadioButton">
@@ -73,13 +77,7 @@
             </Setter>
         </Style>
 
-        <Style x:Key="SectionHeader" TargetType="TextBlock">
-            <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI"/>
-            <Setter Property="FontSize" Value="13"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
-            <Setter Property="Margin" Value="0,0,0,10"/>
-        </Style>
+        <!-- SectionHeader moved to Styles/Typography.xaml per APP_DESIGN §13.5 (P1-6). -->
 
         <Style x:Key="RowCard" TargetType="Border">
             <Setter Property="Background" Value="{DynamicResource Surface}"/>
@@ -94,6 +92,7 @@
             <Setter Property="Width" Value="36"/>
             <Setter Property="Height" Value="20"/>
             <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{DynamicResource Focus.Mint}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="CheckBox">
@@ -130,6 +129,7 @@
 
         <Style x:Key="SegmentButton" TargetType="RadioButton">
             <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{DynamicResource Focus.Mint}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="RadioButton">
@@ -224,26 +224,18 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <Ellipse Width="7" Height="7" Fill="{DynamicResource Mint}" VerticalAlignment="Center">
-                        <Ellipse.Effect>
-                            <DropShadowEffect Color="#4DDBA6" BlurRadius="6"
-                                              ShadowDepth="0" Opacity="0.5"/>
-                        </Ellipse.Effect>
-                    </Ellipse>
+                    <Ellipse Style="{StaticResource Dot.Mint}"/>
                     <TextBlock x:Name="StatusLabel"
                                Grid.Column="1"
                                Text="—"
-                               Foreground="{DynamicResource MutedText}"
+                               Style="{StaticResource Type.MonoSm}"
                                FontFamily="Segoe UI Variable Text, Segoe UI"
-                               FontSize="11"
                                Margin="8,0,0,0"
                                VerticalAlignment="Center"/>
                     <TextBlock x:Name="SidebarHotkeyGlyph"
                                Grid.Column="2"
                                Text="—"
-                               FontFamily="Cascadia Mono, Consolas, monospace"
-                               FontSize="11"
-                               Foreground="{DynamicResource MutedText}"
+                               Style="{StaticResource Type.MonoSm}"
                                VerticalAlignment="Center"/>
                 </Grid>
             </Grid>
@@ -258,76 +250,67 @@
                 <!-- ── General tab ──────────────────────────────────────── -->
                 <StackPanel x:Name="ContentGeneral">
                     <TextBlock Style="{StaticResource SectionHeader}" Text="Hotkey"/>
-                    <Grid HorizontalAlignment="Left" Width="440" Margin="0,0,0,28">
-                        <Border x:Name="HotkeyCard"
-                                Style="{StaticResource RowCard}"
-                                Padding="22,20"
-                                Cursor="Hand"
-                                MouseLeftButtonDown="OnHotkeyCardClick">
-                            <StackPanel>
-                                <TextBlock x:Name="HotkeyEyebrow"
-                                           Text="HOTKEY"
+                    <!-- §13.5 P1-8 / P2-5: hotkey card + conflict row share a single
+                         440 px-wide column StackPanel so the conflict row sits 1 px
+                         below the card when visible, and the section gap (28 px) is
+                         owned by the wrapper instead of by a negative-margin tuck. -->
+                    <StackPanel HorizontalAlignment="Left" Width="440" Margin="0,0,0,28">
+                        <Grid>
+                            <Border x:Name="HotkeyCard"
+                                    Style="{StaticResource RowCard}"
+                                    Padding="22,20"
+                                    Cursor="Hand"
+                                    MouseLeftButtonDown="OnHotkeyCardClick">
+                                <StackPanel>
+                                    <TextBlock x:Name="HotkeyEyebrow"
+                                               Text="HOTKEY"
+                                               Style="{StaticResource Type.Eyebrow}"
+                                               Margin="0,0,0,10"/>
+                                    <StackPanel x:Name="HotkeyKeycaps" Orientation="Horizontal"/>
+                                    <TextBlock Text="Hold this chord anywhere in Windows to start dictation. Release to stop and paste."
+                                               Style="{StaticResource Type.RowSubtitle}"
+                                               Margin="0,14,0,0"/>
+                                    <TextBlock x:Name="HotkeyHint"
+                                               Text="Tap the picker, then press a new chord."
+                                               FontFamily="Segoe UI Variable Text, Segoe UI"
+                                               FontSize="11"
+                                               Foreground="{DynamicResource DisabledText}"
+                                               FontStyle="Italic"
+                                               Margin="0,6,0,0"/>
+                                </StackPanel>
+                            </Border>
+                            <Rectangle x:Name="HotkeyListenBorder"
+                                       Stroke="{DynamicResource Mint}"
+                                       StrokeThickness="1.5"
+                                       StrokeDashArray="4 3"
+                                       RadiusX="10" RadiusY="10"
+                                       Visibility="Collapsed"
+                                       IsHitTestVisible="False"/>
+                        </Grid>
+
+                        <Border x:Name="ConflictRow"
+                                Background="{DynamicResource WarningTint}"
+                                BorderBrush="{DynamicResource WarningBorder}"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="14,10"
+                                Margin="0,1,0,0"
+                                Visibility="Collapsed">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Style="{StaticResource Dot.Amber}"/>
+                                <TextBlock Text="Shortcut conflict."
+                                           Style="{StaticResource Type.WarningEmphasis}"
+                                           VerticalAlignment="Center"
+                                           Margin="10,0,8,0"/>
+                                <TextBlock x:Name="ConflictText"
                                            FontFamily="Segoe UI Variable Text, Segoe UI"
-                                           FontSize="10.5"
-                                           FontWeight="SemiBold"
-                                           Foreground="{DynamicResource MutedText}"
-                                           Margin="0,0,0,10"/>
-                                <StackPanel x:Name="HotkeyKeycaps" Orientation="Horizontal"/>
-                                <TextBlock Text="Hold this chord anywhere in Windows to start dictation. Release to stop and paste."
-                                           FontFamily="Segoe UI Variable Text, Segoe UI"
-                                           FontSize="11.5"
-                                           Foreground="{DynamicResource MutedText}"
-                                           TextWrapping="Wrap"
-                                           Margin="0,14,0,0"/>
-                                <TextBlock x:Name="HotkeyHint"
-                                           Text="Tap the picker, then press a new chord."
-                                           FontFamily="Segoe UI Variable Text, Segoe UI"
-                                           FontSize="11"
-                                           Foreground="{DynamicResource DisabledText}"
-                                           FontStyle="Italic"
-                                           Margin="0,6,0,0"/>
+                                           FontSize="12"
+                                           Foreground="{DynamicResource PrimaryText}"
+                                           VerticalAlignment="Center"
+                                           TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
-                        <Rectangle x:Name="HotkeyListenBorder"
-                                   Stroke="{DynamicResource Mint}"
-                                   StrokeThickness="1.5"
-                                   StrokeDashArray="4 3"
-                                   RadiusX="10" RadiusY="10"
-                                   Visibility="Collapsed"
-                                   IsHitTestVisible="False"/>
-                    </Grid>
-
-                    <Border x:Name="ConflictRow"
-                            HorizontalAlignment="Left"
-                            Width="440"
-                            Background="{DynamicResource WarningTint}"
-                            BorderBrush="{DynamicResource WarningBorder}"
-                            BorderThickness="1"
-                            CornerRadius="6"
-                            Padding="14,10"
-                            Margin="0,-20,0,28"
-                            Visibility="Collapsed">
-                        <StackPanel Orientation="Horizontal">
-                            <Ellipse Width="7" Height="7" Fill="{DynamicResource WarningAmber}" VerticalAlignment="Center">
-                                <Ellipse.Effect>
-                                    <DropShadowEffect Color="#FFB74D" BlurRadius="6" ShadowDepth="0" Opacity="0.55"/>
-                                </Ellipse.Effect>
-                            </Ellipse>
-                            <TextBlock Text="Shortcut conflict."
-                                       FontFamily="Segoe UI Variable Text, Segoe UI"
-                                       FontSize="12"
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource WarningAmber}"
-                                       VerticalAlignment="Center"
-                                       Margin="10,0,8,0"/>
-                            <TextBlock x:Name="ConflictText"
-                                       FontFamily="Segoe UI Variable Text, Segoe UI"
-                                       FontSize="12"
-                                       Foreground="{DynamicResource PrimaryText}"
-                                       VerticalAlignment="Center"
-                                       TextWrapping="Wrap"/>
-                        </StackPanel>
-                    </Border>
+                    </StackPanel>
 
                     <TextBlock Style="{StaticResource SectionHeader}" Text="Startup"/>
                     <Border Style="{StaticResource RowCard}" Margin="0,0,0,28">
@@ -338,16 +321,9 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0">
                                 <TextBlock Text="Launch KusPus when I sign in"
-                                           FontFamily="Segoe UI Variable Text, Segoe UI"
-                                           FontSize="13"
-                                           FontWeight="Medium"
-                                           Foreground="{DynamicResource PrimaryText}"/>
+                                           Style="{StaticResource Type.RowTitle}"/>
                                 <TextBlock Text="Starts KusPus when you sign in to Windows. The tray icon stays available either way."
-                                           FontFamily="Segoe UI Variable Text, Segoe UI"
-                                           FontSize="11.5"
-                                           Foreground="{DynamicResource MutedText}"
-                                           TextWrapping="Wrap"
-                                           Margin="0,3,0,0"/>
+                                           Style="{StaticResource Type.RowSubtitle}"/>
                             </StackPanel>
                             <CheckBox Grid.Column="1"
                                       x:Name="AutostartToggle"
@@ -367,15 +343,9 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0">
                                 <TextBlock Text="Theme"
-                                           FontFamily="Segoe UI Variable Text, Segoe UI"
-                                           FontSize="13"
-                                           FontWeight="Medium"
-                                           Foreground="{DynamicResource PrimaryText}"/>
+                                           Style="{StaticResource Type.RowTitle}"/>
                                 <TextBlock Text="Auto follows the Windows app-mode setting."
-                                           FontFamily="Segoe UI Variable Text, Segoe UI"
-                                           FontSize="11.5"
-                                           Foreground="{DynamicResource MutedText}"
-                                           Margin="0,3,0,0"/>
+                                           Style="{StaticResource Type.RowSubtitle}"/>
                             </StackPanel>
                             <Border Grid.Column="1"
                                     Background="{DynamicResource SurfaceInput}"
@@ -413,16 +383,9 @@
                         <StackPanel>
                             <TextBlock x:Name="AudioDeviceTitle"
                                        Text="—"
-                                       FontFamily="Segoe UI Variable Text, Segoe UI"
-                                       FontSize="13"
-                                       FontWeight="Medium"
-                                       Foreground="{DynamicResource PrimaryText}"/>
+                                       Style="{StaticResource Type.RowTitle}"/>
                             <TextBlock Text="Default capture device. Follows your Windows microphone selection."
-                                       FontFamily="Segoe UI Variable Text, Segoe UI"
-                                       FontSize="11.5"
-                                       Foreground="{DynamicResource MutedText}"
-                                       TextWrapping="Wrap"
-                                       Margin="0,3,0,0"/>
+                                       Style="{StaticResource Type.RowSubtitle}"/>
                         </StackPanel>
                     </Border>
 
@@ -435,16 +398,9 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0">
                                 <TextBlock Text="Microphone level"
-                                           FontFamily="Segoe UI Variable Text, Segoe UI"
-                                           FontSize="13"
-                                           FontWeight="Medium"
-                                           Foreground="{DynamicResource PrimaryText}"/>
+                                           Style="{StaticResource Type.RowTitle}"/>
                                 <TextBlock Text="Active only while this tab is open. Audio is never recorded."
-                                           FontFamily="Segoe UI Variable Text, Segoe UI"
-                                           FontSize="11.5"
-                                           Foreground="{DynamicResource MutedText}"
-                                           TextWrapping="Wrap"
-                                           Margin="0,3,0,0"/>
+                                           Style="{StaticResource Type.RowSubtitle}"/>
                             </StackPanel>
                             <!-- Discord-style level meter: gray placeholder track + mint
                                  fill that grows from the left as input level rises, plus a
@@ -484,17 +440,10 @@
                     <TextBlock Style="{StaticResource SectionHeader}" Text="Active model"/>
                     <Border Style="{StaticResource RowCard}" Margin="0,0,0,28">
                         <StackPanel Orientation="Horizontal">
-                            <Ellipse Width="7" Height="7" Fill="{DynamicResource Mint}" VerticalAlignment="Center">
-                                <Ellipse.Effect>
-                                    <DropShadowEffect Color="#4DDBA6" BlurRadius="6" ShadowDepth="0" Opacity="0.5"/>
-                                </Ellipse.Effect>
-                            </Ellipse>
+                            <Ellipse Style="{StaticResource Dot.Mint}"/>
                             <TextBlock x:Name="ActiveModelText"
                                        Text="—"
-                                       FontFamily="Segoe UI Variable Text, Segoe UI"
-                                       FontSize="13"
-                                       FontWeight="Medium"
-                                       Foreground="{DynamicResource PrimaryText}"
+                                       Style="{StaticResource Type.RowTitle}"
                                        VerticalAlignment="Center"
                                        Margin="10,0,0,0"/>
                         </StackPanel>
@@ -504,11 +453,9 @@
                     <StackPanel x:Name="ModelsList" Margin="0,0,0,12"/>
                     <TextBlock x:Name="ModelsHint"
                                Text="Tap an installed model to activate. The bundled tiny model ships with KusPus."
-                               FontFamily="Segoe UI Variable Text, Segoe UI"
-                               FontSize="11.5"
-                               Foreground="{DynamicResource MutedText}"
-                               TextWrapping="Wrap"
-                               FontStyle="Italic"/>
+                               Style="{StaticResource Type.RowSubtitle}"
+                               FontStyle="Italic"
+                               Margin="0"/>
                 </StackPanel>
 
                 <!-- ── History tab ──────────────────────────────────────── -->
@@ -516,9 +463,7 @@
                     <TextBlock Style="{StaticResource SectionHeader}" Text="History"/>
                     <TextBlock x:Name="HistoryStats"
                                Text="Loading…"
-                               FontFamily="Segoe UI Variable Text, Segoe UI"
-                               FontSize="11.5"
-                               Foreground="{DynamicResource MutedText}"
+                               Style="{StaticResource Type.RowSubtitle}"
                                Margin="0,0,0,14"/>
                     <StackPanel x:Name="HistoryList"/>
                 </StackPanel>
@@ -534,17 +479,10 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0">
                                 <TextBlock Text="Block all outbound traffic"
-                                           FontFamily="Segoe UI Variable Text, Segoe UI"
-                                           FontSize="13"
-                                           FontWeight="Medium"
-                                           Foreground="{DynamicResource PrimaryText}"/>
+                                           Style="{StaticResource Type.RowTitle}"/>
                                 <TextBlock x:Name="OfflineSubtitle"
                                            Text="KusPus may reach model and crash-report servers when needed."
-                                           FontFamily="Segoe UI Variable Text, Segoe UI"
-                                           FontSize="11.5"
-                                           Foreground="{DynamicResource MutedText}"
-                                           Margin="0,3,0,0"
-                                           TextWrapping="Wrap"/>
+                                           Style="{StaticResource Type.RowSubtitle}"/>
                             </StackPanel>
                             <CheckBox x:Name="OfflineToggle"
                                       Grid.Column="1"
@@ -564,17 +502,10 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0">
                                 <TextBlock Text="Send opt-in crash reports"
-                                           FontFamily="Segoe UI Variable Text, Segoe UI"
-                                           FontSize="13"
-                                           FontWeight="Medium"
-                                           Foreground="{DynamicResource PrimaryText}"/>
+                                           Style="{StaticResource Type.RowTitle}"/>
                                 <TextBlock x:Name="CrashReportsSubtitle"
                                            Text="Anonymous, opt-in. Never includes transcripts, audio, or clipboard contents."
-                                           FontFamily="Segoe UI Variable Text, Segoe UI"
-                                           FontSize="11.5"
-                                           Foreground="{DynamicResource MutedText}"
-                                           Margin="0,3,0,0"
-                                           TextWrapping="Wrap"/>
+                                           Style="{StaticResource Type.RowSubtitle}"/>
                             </StackPanel>
                             <CheckBox x:Name="CrashReportsToggle"
                                       Grid.Column="1"
@@ -590,16 +521,11 @@
                         <StackPanel>
                             <TextBlock x:Name="LogsPath"
                                        Text="—"
-                                       FontFamily="Cascadia Mono, Consolas, monospace"
-                                       FontSize="11"
-                                       Foreground="{DynamicResource MutedText}"
+                                       Style="{StaticResource Type.MonoSm}"
                                        TextWrapping="Wrap"/>
                             <Button Content="Open in Explorer"
                                     Click="OnOpenLogsClick"
-                                    Padding="14,7"
-                                    Background="{DynamicResource SurfaceElevated}"
-                                    Foreground="{DynamicResource PrimaryText}"
-                                    BorderThickness="0"
+                                    Style="{StaticResource Btn.Secondary}"
                                     HorizontalAlignment="Left"
                                     Margin="0,10,0,0"/>
                         </StackPanel>
@@ -637,10 +563,7 @@
                                          VerticalAlignment="Center"/>
                         <StackPanel Margin="22,0,0,0" VerticalAlignment="Center">
                             <TextBlock Text="KusPus"
-                                       FontFamily="Segoe UI Variable Display, Segoe UI Variable Text, Segoe UI"
-                                       FontSize="32"
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource PrimaryText}"/>
+                                       Style="{StaticResource Type.Display}"/>
                             <TextBlock x:Name="AboutVersion"
                                        Text="Version —"
                                        FontFamily="Segoe UI Variable Text, Segoe UI"
@@ -649,9 +572,7 @@
                                        Margin="0,4,0,0"/>
                             <TextBlock x:Name="AboutBuildLine"
                                        Text="—"
-                                       FontFamily="Cascadia Mono, Consolas, monospace"
-                                       FontSize="11"
-                                       Foreground="{DynamicResource MutedText}"
+                                       Style="{StaticResource Type.MonoSm}"
                                        Margin="0,4,0,0"/>
                         </StackPanel>
                     </StackPanel>
@@ -665,23 +586,15 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0">
                                 <TextBlock Text="Source code"
-                                           FontFamily="Segoe UI Variable Text, Segoe UI"
-                                           FontSize="13"
-                                           FontWeight="Medium"
-                                           Foreground="{DynamicResource PrimaryText}"/>
+                                           Style="{StaticResource Type.RowTitle}"/>
                                 <TextBlock Text="github.com/devangk003/kuspus"
-                                           FontFamily="Cascadia Mono, Consolas, monospace"
-                                           FontSize="11"
-                                           Foreground="{DynamicResource MutedText}"
+                                           Style="{StaticResource Type.MonoSm}"
                                            Margin="0,3,0,0"/>
                             </StackPanel>
                             <Button Grid.Column="1"
                                     Content="Open on GitHub"
                                     Click="OnOpenGitHubClick"
-                                    Padding="14,7"
-                                    Background="{DynamicResource SurfaceElevated}"
-                                    Foreground="{DynamicResource PrimaryText}"
-                                    BorderThickness="0"
+                                    Style="{StaticResource Btn.Secondary}"
                                     VerticalAlignment="Center"/>
                         </Grid>
                     </Border>
@@ -694,15 +607,10 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0">
                                 <TextBlock Text="Log folder"
-                                           FontFamily="Segoe UI Variable Text, Segoe UI"
-                                           FontSize="13"
-                                           FontWeight="Medium"
-                                           Foreground="{DynamicResource PrimaryText}"/>
+                                           Style="{StaticResource Type.RowTitle}"/>
                                 <TextBlock x:Name="AboutLogsPath"
                                            Text="—"
-                                           FontFamily="Cascadia Mono, Consolas, monospace"
-                                           FontSize="11"
-                                           Foreground="{DynamicResource MutedText}"
+                                           Style="{StaticResource Type.MonoSm}"
                                            Margin="0,3,0,0"
                                            TextTrimming="CharacterEllipsis"
                                            MaxWidth="500"/>
@@ -710,10 +618,7 @@
                             <Button Grid.Column="1"
                                     Content="Open in Explorer"
                                     Click="OnOpenLogsClick"
-                                    Padding="14,7"
-                                    Background="{DynamicResource SurfaceElevated}"
-                                    Foreground="{DynamicResource PrimaryText}"
-                                    BorderThickness="0"
+                                    Style="{StaticResource Btn.Secondary}"
                                     VerticalAlignment="Center"/>
                         </Grid>
                     </Border>
@@ -726,24 +631,14 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0">
                                 <TextBlock Text="Re-run onboarding"
-                                           FontFamily="Segoe UI Variable Text, Segoe UI"
-                                           FontSize="13"
-                                           FontWeight="Medium"
-                                           Foreground="{DynamicResource PrimaryText}"/>
+                                           Style="{StaticResource Type.RowTitle}"/>
                                 <TextBlock Text="Walks through the 7-step first-launch flow again."
-                                           FontFamily="Segoe UI Variable Text, Segoe UI"
-                                           FontSize="11.5"
-                                           Foreground="{DynamicResource MutedText}"
-                                           TextWrapping="Wrap"
-                                           Margin="0,3,0,0"/>
+                                           Style="{StaticResource Type.RowSubtitle}"/>
                             </StackPanel>
                             <Button Grid.Column="1"
                                     Content="Run again"
                                     Click="OnRerunOnboardingClick"
-                                    Padding="14,7"
-                                    Background="{DynamicResource SurfaceElevated}"
-                                    Foreground="{DynamicResource PrimaryText}"
-                                    BorderThickness="0"
+                                    Style="{StaticResource Btn.Secondary}"
                                     VerticalAlignment="Center"/>
                         </Grid>
                     </Border>

@@ -1,0 +1,29 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!--
+        Focus-visual style per APP_DESIGN §13.5 (P1-9). One reusable FocusVisualStyle
+        with a 1.5 px mint dashed outline at 2 px inset — meets the WCAG keyboard-
+        navigation requirement and reads as a deliberate design choice rather than
+        the default WPF dotted-Aero ring.
+
+        Apply via Setter Property="FocusVisualStyle" Value="{StaticResource Focus.Mint}"
+        on any control style (sidebar tab, toggle, segment, buttons).
+    -->
+
+    <Style x:Key="Focus.Mint">
+        <Setter Property="Control.Template">
+            <Setter.Value>
+                <ControlTemplate>
+                    <Rectangle Margin="-2"
+                               Stroke="{DynamicResource Mint}"
+                               StrokeThickness="1.5"
+                               StrokeDashArray="3 2"
+                               RadiusX="6" RadiusY="6"
+                               SnapsToDevicePixels="True"
+                               IsHitTestVisible="False"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+</ResourceDictionary>

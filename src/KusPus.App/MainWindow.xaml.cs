@@ -1104,11 +1104,14 @@ public partial class MainWindow : Window
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         bool ok = r.Status == TranscriptStatus.Ok;
+        // §13.5 P1-7: pull the Dot.Mint / Dot.Red style from Application.Resources
+        // so the dot picks up the same 7 px ellipse + 6 px coloured glow as every
+        // other status indicator in the window. FindResource walks up the resource
+        // chain so MainWindow.Resources isn't enough — needs the App-level dictionary.
         var dot = new Ellipse
         {
-            Width = 7, Height = 7,
-            Fill = ok ? Theme("Mint") : Theme("ErrorRed"),
-            VerticalAlignment = VerticalAlignment.Center,
+            Style = (Style)System.Windows.Application.Current.FindResource(
+                ok ? "Dot.Mint" : "Dot.Red"),
         };
         Grid.SetColumn(dot, 0);
 

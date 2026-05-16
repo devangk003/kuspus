@@ -1472,7 +1472,7 @@ Applied first in: hotkey-picker listen-mode hint (`Now press the keys you want t
 
 | P0-5 | P0 | Audio tab mic-active privacy disclosure | `MainWindow.xaml.cs:692-738` | todo |
 
-| P1-1 | P1 | Button styles (primary / secondary / ghost / danger × sm/md/lg) — replace 5 inline-styled call sites | `Styles/Buttons.xaml` (new) + `MainWindow.xaml:491,616,697,729,758` | todo |
+| P1-1 | P1 | Button styles (primary / secondary / ghost / danger × sm/md/lg) — replace 5 inline-styled call sites | `Styles/Buttons.xaml` + `MainWindow.xaml` | done |
 
 | P1-2 | P1 | History search bar + bulk footer + purge-all flow | `MainWindow.xaml:534-544` | todo |
 
@@ -1482,15 +1482,15 @@ Applied first in: hotkey-picker listen-mode hint (`Now press the keys you want t
 
 | P1-5 | P1 | Migrate Models + History row rendering to DataTemplates (remove `Theme()` brush resolver) | `MainWindow.xaml.cs:385-386, 873-906` | todo |
 
-| P1-6 | P1 | Typography style set (`SectionHeader`, `RowTitle`, `RowSubtitle`, `Eyebrow`, `KeyMono`, `BodySmall`) replacing ~40 inline triplets | `Styles/Typography.xaml` (new) | todo |
+| P1-6 | P1 | Typography style set (`SectionHeader`, `RowTitle`, `RowSubtitle`, `Eyebrow`, `KeyMono`, `BodySmall`) replacing ~40 inline triplets | `Styles/Typography.xaml` | done |
 
-| P1-7 | P1 | `StatusDot` style replacing 6 hand-rolled Ellipses | `Styles/Dot.xaml` (new) | todo |
+| P1-7 | P1 | `StatusDot` style replacing 6 hand-rolled Ellipses | `Styles/Dot.xaml` | done |
 
-| P1-8 | P1 | Section gap rhythm — drop negative margins, use one vertical spacing scale | `MainWindow.xaml:299-329` | todo |
+| P1-8 | P1 | Section gap rhythm — drop negative margins, use one vertical spacing scale | `MainWindow.xaml:299-329` | done |
 
-| P1-9 | P1 | Keyboard focus visuals on sidebar tabs, segments, toggles, buttons | `MainWindow.xaml` Style blocks | todo |
+| P1-9 | P1 | Keyboard focus visuals on sidebar tabs, segments, toggles, buttons | `Styles/Focus.xaml` + Style blocks | done |
 
-| P1-10 | P1 | Extract per-tab `UserControl`s (`GeneralView`, `AudioView`, …) per TECH\_SPEC §22 | `Views/*.xaml` (new) | todo |
+| P1-10 | P1 | Extract per-tab `UserControl`s (`GeneralView`, `AudioView`, …) per TECH\_SPEC §22 | `Views/*.xaml` (new) | deferred (post-W3) |
 
 | P2-1 | P2 | Copy: "HKCU\Run entry" → user-language rewrite (§13.2) | `MainWindow.xaml:344` | done |
 
@@ -1500,7 +1500,7 @@ Applied first in: hotkey-picker listen-mode hint (`Now press the keys you want t
 
 | P2-4 | P2 | Inline `[ESC]` keycap in hotkey-listen hint (§13.4) | `MainWindow.xaml.cs:417` | done |
 
-| P2-5 | P2 | Reflow ConflictRow inside Hotkey StackPanel — drop negative margin tuck | `MainWindow.xaml:307` | todo |
+| P2-5 | P2 | Reflow ConflictRow inside Hotkey StackPanel — drop negative margin tuck | `MainWindow.xaml:307` | done |
 
 | P2-6 | P2 | Bump `HoverSubtle` brush to 8–10 % so sidebar hover is visible | `ThemeTokens.cs:43` | todo |
 

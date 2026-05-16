@@ -1,0 +1,90 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!--
+        Typography style set per docs/APP_DESIGN.md §1.4 (Type system) + §3.4
+        (Row component) + §13.5 (P1-6 refactor). Every TextBlock in MainWindow
+        + OnboardingWindow that previously declared a FontFamily / FontSize /
+        FontWeight / Foreground quadruplet now references one of these styles
+        instead — collapsing ~40 inline declarations into 8 reusable roles.
+
+        Keys are unprefixed so they sit alongside other named styles in the
+        merged Application.Resources dictionary. Foreground bindings use
+        DynamicResource so a runtime theme flip propagates through every
+        TextBlock automatically (same contract as the brushes themselves).
+
+        Roles, by visible size:
+            Type.Display         — 32 / SemiBold   (About header wordmark)
+            Type.SectionHeader   — 13 / SemiBold   (left-aligned section eyebrow inside a tab)
+            Type.RowTitle        — 13 / Medium     (top line of a row card)
+            Type.RowSubtitle     — 11.5 / Regular  (helper line beneath the row title)
+            Type.Eyebrow         — 10.5 / SemiBold (e.g. HOTKEY uppercase eyebrow)
+            Type.MonoSm          — 11 / Medium     (hotkey glyph, log path, timestamps)
+            Type.MonoXs          — 10.5 / Medium   (history footer model · duration)
+            Type.WarningEmphasis — 12 / SemiBold   (conflict-row title)
+    -->
+
+    <FontFamily x:Key="Type.SansFamily">Segoe UI Variable Text, Segoe UI</FontFamily>
+    <FontFamily x:Key="Type.MonoFamily">Cascadia Mono, Consolas, monospace</FontFamily>
+
+    <Style x:Key="Type.Display" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="Segoe UI Variable Display, Segoe UI Variable Text, Segoe UI"/>
+        <Setter Property="FontSize" Value="32"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+    </Style>
+
+    <!-- Kept named "SectionHeader" (unprefixed) so existing XAML references
+         in MainWindow.xaml don't have to rename in this pass; the new roles
+         take the Type.* prefix to avoid colliding with future style additions. -->
+    <Style x:Key="SectionHeader" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource Type.SansFamily}"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+        <Setter Property="Margin" Value="0,0,0,10"/>
+    </Style>
+
+    <Style x:Key="Type.RowTitle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource Type.SansFamily}"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="FontWeight" Value="Medium"/>
+        <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+    </Style>
+
+    <Style x:Key="Type.RowSubtitle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource Type.SansFamily}"/>
+        <Setter Property="FontSize" Value="11.5"/>
+        <Setter Property="Foreground" Value="{DynamicResource MutedText}"/>
+        <Setter Property="TextWrapping" Value="Wrap"/>
+        <Setter Property="Margin" Value="0,3,0,0"/>
+    </Style>
+
+    <Style x:Key="Type.Eyebrow" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource Type.SansFamily}"/>
+        <Setter Property="FontSize" Value="10.5"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource MutedText}"/>
+    </Style>
+
+    <Style x:Key="Type.MonoSm" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource Type.MonoFamily}"/>
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="FontWeight" Value="Medium"/>
+        <Setter Property="Foreground" Value="{DynamicResource MutedText}"/>
+    </Style>
+
+    <Style x:Key="Type.MonoXs" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource Type.MonoFamily}"/>
+        <Setter Property="FontSize" Value="10.5"/>
+        <Setter Property="FontWeight" Value="Medium"/>
+        <Setter Property="Foreground" Value="{DynamicResource MutedText}"/>
+    </Style>
+
+    <Style x:Key="Type.WarningEmphasis" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource Type.SansFamily}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource WarningAmber}"/>
+    </Style>
+
+</ResourceDictionary>
