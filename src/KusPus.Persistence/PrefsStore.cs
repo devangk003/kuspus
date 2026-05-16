@@ -54,7 +54,10 @@ public sealed class PrefsStore : IPrefsStore, IDisposable
             var tempPath = _path + ".tmp";
             var json = JsonSerializer.Serialize(updated, JsonOptions.Default);
             await File.WriteAllTextAsync(tempPath, json, ct).ConfigureAwait(false);
-            ReplaceOrMove(tempPath, _path);
+            // The constructor always writes settings.json on first run, so by the time
+            // any SaveAsync executes the destination is guaranteed to exist. File.Replace
+            // is atomic on NTFS — see TECH_SPEC §9.5.
+            File.Replace(tempPath, _path, destinationBackupFileName: null);
             _changes.OnNext(updated);
         }
         finally
@@ -129,6 +132,11 @@ public sealed class PrefsStore : IPrefsStore, IDisposable
                 return DefaultSettings.ForFirstRun();
             }
 
+            // TECH_SPEC §9.4: "Unknown fields are warned + ignored." Walk the top-level
+            // object and warn on anything not in our schema; deserialisation then
+            // silently skips them (System.Text.Json default).
+            LogUnknownTopLevelFields(root);
+
             var deserialised = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions.Default);
             if (deserialised is null)
             {
@@ -142,6 +150,28 @@ public sealed class PrefsStore : IPrefsStore, IDisposable
         {
             _logger.LogWarning(ex, "Settings JSON corrupt; resetting to defaults.");
             return DefaultSettings.ForFirstRun();
+        }
+    }
+
+    private static readonly HashSet<string> KnownTopLevelFields = new(StringComparer.Ordinal)
+    {
+        "schemaVersion", "hotkey", "audio", "models", "ui",
+        "history", "privacy", "autostart", "onboarding",
+    };
+
+    private void LogUnknownTopLevelFields(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        foreach (var prop in root.EnumerateObject())
+        {
+            if (!KnownTopLevelFields.Contains(prop.Name))
+            {
+                _logger.LogWarning("Unknown settings field '{Name}' will be ignored.", prop.Name);
+            }
         }
     }
 
@@ -170,19 +200,4 @@ public sealed class PrefsStore : IPrefsStore, IDisposable
         }
     }
 
-    private static void ReplaceOrMove(string tempPath, string finalPath)
-    {
-        // File.Replace requires the destination to exist. On the very first save
-        // after a corrupt/deleted settings.json was just rewritten in the
-        // constructor, the file does exist; but the fall-through to File.Move is
-        // a cheap safety net for any race where it doesn't.
-        if (File.Exists(finalPath))
-        {
-            File.Replace(tempPath, finalPath, destinationBackupFileName: null);
-        }
-        else
-        {
-            File.Move(tempPath, finalPath);
-        }
-    }
 }
