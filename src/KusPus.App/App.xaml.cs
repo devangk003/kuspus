@@ -77,6 +77,19 @@ public partial class App : System.Windows.Application
 
         _log = _services.GetRequiredService<ILoggerFactory>().CreateLogger("KusPus.App");
         _log.LogInformation("KusPus starting up. Logs at {Path}.", AppPaths.LogsDir);
+        // Phase 12 rc3 diagnostic — log all resolved AppPaths values + whether
+        // the directory exists, so we can compare what the installed single-
+        // file app sees vs what PowerShell/dev sees. Helps isolate single-
+        // file-extraction quirks in SpecialFolder resolution.
+        _log.LogInformation(
+            "AppPaths — SettingsDir='{Settings}' (exists={SE}) LocalDataDir='{Local}' (exists={LE}) " +
+            "ModelsDir='{Models}' (exists={ME}) LogsDir='{Logs}' (exists={LgE}) " +
+            "WhisperDir='{Whisper}' (exists={WE})",
+            AppPaths.SettingsDir, Directory.Exists(AppPaths.SettingsDir),
+            AppPaths.LocalDataDir, Directory.Exists(AppPaths.LocalDataDir),
+            AppPaths.ModelsDir, Directory.Exists(AppPaths.ModelsDir),
+            AppPaths.LogsDir, Directory.Exists(AppPaths.LogsDir),
+            AppPaths.WhisperDir, Directory.Exists(AppPaths.WhisperDir));
 
         // Theme brushes installed before any window is constructed so XAML can
         // resolve {DynamicResource AppBg} etc. at MainWindow.InitializeComponent.
