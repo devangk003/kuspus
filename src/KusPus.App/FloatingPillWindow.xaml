@@ -245,10 +245,15 @@
                             </ControlTemplate.Triggers>
                         </ControlTemplate>
                     </Button.Template>
+                    <!-- 10×10 (was 8×8) so the visual footprint matches the
+                         pin glyph's ascent in the right cluster — corner
+                         buttons now look balanced left ↔ right. Fill defaults
+                         to MutedText (grey, theme-aware) and morphs to red on
+                         Recording via UpdateRecordGlyph. -->
                     <Rectangle x:Name="CompactRecordGlyph"
-                               Width="8" Height="8"
-                               RadiusX="4" RadiusY="4"
-                               Fill="#EF5350"/>
+                               Width="10" Height="10"
+                               RadiusX="5" RadiusY="5"
+                               Fill="{DynamicResource MutedText}"/>
                 </Button>
 
                 <!-- ── PIN + MAGIC-WAND BUTTONS (top-right corner) ─────────── -->

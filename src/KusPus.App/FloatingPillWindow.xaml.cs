@@ -1238,16 +1238,21 @@ public partial class FloatingPillWindow : Window
 
     private void UpdateRecordGlyph(PillVisual state)
     {
-        // RadiusX=4 + W=8 renders as a circle (radius = half side). Drop the
-        // radius to 1.5 and it reads as a filled rounded square — the canonical
-        // "press to stop" affordance. Mirror the change on the compact corner
-        // record button so both icons stay in sync.
         bool recording = state == PillVisual.Recording;
-        double r = recording ? 1.5 : 4;
-        RecordGlyph.RadiusX = r;
-        RecordGlyph.RadiusY = r;
-        CompactRecordGlyph.RadiusX = r;
-        CompactRecordGlyph.RadiusY = r;
+        // Dock record glyph (8×8): full-circle dot ↔ rounded square. Always red.
+        double rDock = recording ? 1.5 : 4;
+        RecordGlyph.RadiusX = rDock;
+        RecordGlyph.RadiusY = rDock;
+        // Compact corner record glyph (10×10): grey-when-idle, red-when-recording
+        // (per user dogfood feedback — the corner button shouldn't read as
+        // "always recording"; grey communicates "available, tap to start").
+        double rCompact = recording ? 2 : 5;
+        CompactRecordGlyph.RadiusX = rCompact;
+        CompactRecordGlyph.RadiusY = rCompact;
+        CompactRecordGlyph.Fill = recording
+            ? new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromRgb(0xEF, 0x53, 0x50))
+            : (System.Windows.Media.Brush)System.Windows.Application.Current.FindResource("MutedText");
     }
 
     private void OnRecordToggleClick(object sender, RoutedEventArgs e)
@@ -1268,14 +1273,13 @@ public partial class FloatingPillWindow : Window
 
     private void ShowRecordNudge()
     {
-        // 10s display. Sole dismissal path — the earlier "auto-dismiss when
-        // state == Recording" rule was wrong: ToggleFromTray flips the FSM
-        // to Recording within a few ms of the click, so the nudge popped
-        // and vanished before the user could read it. A pure timer is the
-        // correct gate for an informational hint.
+        // 2s display per user feedback — 10s was too long and lingered after
+        // the user had already moved on. The dismiss-on-Recording rule that
+        // killed the earlier 6s/3s nudges was removed; pure timer is the
+        // sole dismissal path.
         _nudgeTimer?.Stop();
         RecordNudgePopup.IsOpen = true;
-        _nudgeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
+        _nudgeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _nudgeTimer.Tick += (_, _) =>
         {
             _nudgeTimer?.Stop();
