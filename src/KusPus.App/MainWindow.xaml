@@ -541,10 +541,17 @@
 
                     <Border Style="{StaticResource RowCard}" Padding="0">
                         <StackPanel>
-                            <!-- Search bar — debounced full-text against transcripts_fts. -->
+                            <!-- Search bar — debounced full-text against transcripts_fts.
+                                 Mint accent treatment per UX audit 2026-05-17:
+                                 (a) magnifier glyph tinted Mint as a persistent
+                                 brand cue (low-key); (b) bottom divider thickened
+                                 to 2 px in Mint so the element doubles as both
+                                 the prominent brand accent and the divider above
+                                 the table header. No mint background — that would
+                                 compete with the row data below. -->
                             <Border Padding="14,8"
-                                    BorderBrush="{DynamicResource BorderSubtle}"
-                                    BorderThickness="0,0,0,1">
+                                    BorderBrush="{DynamicResource Mint}"
+                                    BorderThickness="0,0,0,2">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto"/>
@@ -554,6 +561,7 @@
                                     <TextBlock Grid.Column="0"
                                                Text="&#xE721;"
                                                Style="{StaticResource Type.IconSm}"
+                                               Foreground="{DynamicResource Mint}"
                                                VerticalAlignment="Center"/>
                                     <TextBox Grid.Column="1"
                                              x:Name="HistorySearchBox"
