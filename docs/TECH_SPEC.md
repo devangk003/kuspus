@@ -932,7 +932,7 @@ List available models. Download from HuggingFace. Verify SHA-256. Activate. Dete
 ### Download flow
 
 1. `HttpClient` GET to manifest URL. Header `Accept-Encoding: identity` (no compression — whisper models are pre-compressed binaries).
-2. Stream into `%LOCALAPPDATA%\KusPus\models\{fileName}.tmp`, computing SHA-256 as we go.
+2. Stream into `{app}\whisper\models\{fileName}.tmp`, computing SHA-256 as we go. (Was `%LOCALAPPDATA%\KusPus\models\` — moved into the install dir in Phase 12 dogfood 2026-05-17 because Defender's Controlled Folder Access silently blocks unsigned binaries from listing files under `%LOCALAPPDATA%\<vendor>\` even when the user's ACL allows it. CFA almost never blocks an app reading its own install directory. See `CLAUDE.md` deviation log.)
 3. On completion, compare SHA to manifest entry.
 4. SHA match: `File.Replace` `.tmp` → final name. SHA mismatch: delete `.tmp`, surface error, do not activate.
 5. Progress events at 1 Hz to the UI.

@@ -18,8 +18,6 @@ internal static class AppPaths
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "KusPus");
 
-    public static readonly string ModelsDir = Path.Combine(LocalDataDir, "models");
-
     public static readonly string LogsDir = Path.Combine(LocalDataDir, "logs");
 
     public static readonly string FailedDir = Path.Combine(LocalDataDir, "failed");
@@ -27,7 +25,7 @@ internal static class AppPaths
     public static readonly string HistoryDbPath = Path.Combine(LocalDataDir, "history.db");
 
     /// <summary>
-    /// Where whisper.exe + DLLs live. Per TECH_SPEC §7.2 this is alongside the app exe;
+    /// Where whisper.exe + DLLs live. Alongside the app exe per TECH_SPEC §7.2;
     /// developers running from <c>dotnet run</c> can override by setting
     /// <c>KUSPUS_WHISPER_DIR</c> in the environment.
     /// </summary>
@@ -36,11 +34,43 @@ internal static class AppPaths
         ?? Path.Combine(AppContext.BaseDirectory, "whisper");
 
     /// <summary>
-    /// Optional expected SHA-256 of <c>whisper.exe</c>. Empty/null skips the integrity
-    /// check (dev mode). Phase 12 release builds will set this from <c>SHA256SUMS</c>.
+    /// Where downloaded model .bin files live. Inside the whisper subdir of
+    /// the install directory rather than under <c>%LOCALAPPDATA%\KusPus\</c>
+    /// per dogfood finding 2026-05-17: Controlled Folder Access (Defender's
+    /// ransomware protection) blocks unsigned apps from listing files in
+    /// user-data paths but trusts them in their own install directory.
+    /// Override with <c>KUSPUS_MODELS_DIR</c> for tests / portable layouts.
     /// </summary>
-    public static string ExpectedWhisperSha256 =>
-        Environment.GetEnvironmentVariable("KUSPUS_WHISPER_SHA256") ?? string.Empty;
+    public static string ModelsDir =>
+        Environment.GetEnvironmentVariable("KUSPUS_MODELS_DIR")
+        ?? Path.Combine(WhisperDir, "models");
+
+    /// <summary>
+    /// Expected SHA-256 of <c>whisper.exe</c>. Empty string ⇒ integrity check
+    /// is a no-op (dev mode). Resolution order:
+    /// <list type="number">
+    ///   <item><c>KUSPUS_WHISPER_SHA256</c> env-var override (debug-only escape hatch).</item>
+    ///   <item><c>BuildConstants.ExpectedWhisperSha256</c> embedded at build time
+    ///         by the <c>EmitWhisperShaConstant</c> MSBuild target in
+    ///         <c>KusPus.App.csproj</c> — reads <c>installer/payload/whisper/SHA256SUMS</c>
+    ///         and emits the SHA into a generated <c>WhisperSha.g.cs</c>.</item>
+    ///   <item>Empty string fallback (dev / unit-test hosts).</item>
+    /// </list>
+    /// Release builds run <c>tools/build-whisper-windows.ps1</c> first, which
+    /// populates <c>SHA256SUMS</c>, so the build constant carries the real hash.
+    /// </summary>
+    public static string ExpectedWhisperSha256
+    {
+        get
+        {
+            var envOverride = Environment.GetEnvironmentVariable("KUSPUS_WHISPER_SHA256");
+            if (!string.IsNullOrEmpty(envOverride))
+            {
+                return envOverride;
+            }
+            return BuildConstants.ExpectedWhisperSha256;
+        }
+    }
 
     /// <summary>
     /// Where intermediate <c>.wav</c> files live during recording. Defaults to the
