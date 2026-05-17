@@ -1050,8 +1050,13 @@ public partial class FloatingPillWindow : Window
 
     private void OnPillMouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
     {
-        OpenDock();
-        // Phase 2: in Idle, swap SVG+wordmark → visualizer+IDLE label on hover.
+        // Pin = compact-mode toggle (user spec): while pinned, hover MUST NOT
+        // re-expand the window or re-show the dock — only the idle content
+        // swaps SVG+wordmark → visualizer+IDLE label.
+        if (!_isPinned)
+        {
+            OpenDock();
+        }
         ApplyIdleContent();
     }
 
@@ -1060,11 +1065,16 @@ public partial class FloatingPillWindow : Window
         // Don't close while the user has the mic chooser open — moving the
         // cursor over the popup fires the pill's MouseLeave (documented WPF
         // behaviour). Popup's Closed handler re-evaluates on close.
-        if (_isPinned || _pickerOpen)
+        if (_pickerOpen)
         {
             return;
         }
-        CloseDock();
+        // Pinned mode: don't contract (we're already contracted) — only flip
+        // content back to SVG+wordmark.
+        if (!_isPinned)
+        {
+            CloseDock();
+        }
         ApplyIdleContent();
     }
 
@@ -1143,12 +1153,16 @@ public partial class FloatingPillWindow : Window
 
     private void AnimateCornerButtons(bool visible)
     {
-        CornerButtons.IsHitTestVisible = visible;
-        var ease = new CubicEase { EasingMode = visible ? EasingMode.EaseOut : EasingMode.EaseIn };
+        // While pinned (compact mode), the pin button stays visible always so
+        // the user can click it again to unpin. The buttons share a StackPanel,
+        // so the magic-wand rides along — harmless (it's dormant anyway).
+        bool effectiveVisible = visible || _isPinned;
+        CornerButtons.IsHitTestVisible = effectiveVisible;
+        var ease = new CubicEase { EasingMode = effectiveVisible ? EasingMode.EaseOut : EasingMode.EaseIn };
         CornerButtons.BeginAnimation(OpacityProperty,
-            new DoubleAnimation { To = visible ? 1.0 : 0.0, Duration = PinFade, EasingFunction = ease });
+            new DoubleAnimation { To = effectiveVisible ? 1.0 : 0.0, Duration = PinFade, EasingFunction = ease });
         // Pin un-rotates on hover-in, rotates back to -12° on hover-out (unless pinned).
-        double targetAngle = (visible || _isPinned) ? 0.0 : -12.0;
+        double targetAngle = effectiveVisible ? 0.0 : -12.0;
         PinRotation.BeginAnimation(RotateTransform.AngleProperty,
             new DoubleAnimation { To = targetAngle, Duration = PinRotate,
                 EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
@@ -1162,19 +1176,25 @@ public partial class FloatingPillWindow : Window
 #pragma warning disable CA1848, CA1873
         _logger.LogDebug("Pin toggled → {Pinned}.", _isPinned);
 #pragma warning restore CA1848, CA1873
-        // Mint tint glyph + bg when pinned.
+        // Mint tint glyph when pinned.
         PinGlyph.SetResourceReference(TextBlock.ForegroundProperty,
             _isPinned ? "Mint" : "SecondaryText");
         if (_isPinned)
         {
-            // Latched open — make sure dock + corners are showing regardless of hover.
-            OpenDock();
-        }
-        // If just un-pinned and cursor isn't over the window, close the dock.
-        else if (!IsMouseOver)
-        {
+            // Compact mode (user spec): contract pill + slide dock back, even
+            // though the cursor is still over the pill from clicking pin. The
+            // pin button stays visible (AnimateCornerButtons → effectiveVisible
+            // includes _isPinned). Content stays as visualizer for as long as
+            // the cursor remains; OnPillMouseLeave will swap it to SVG.
             CloseDock();
         }
+        else if (IsMouseOver)
+        {
+            // Just unpinned and still hovered → resume the normal hover-expand.
+            OpenDock();
+        }
+        // else (unpinned + not hovered) → leave the pill in its contracted
+        // resting state; next hover will OpenDock normally.
     }
 
     private void OnRecordToggleClick(object sender, RoutedEventArgs e)

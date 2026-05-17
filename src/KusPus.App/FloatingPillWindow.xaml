@@ -102,7 +102,7 @@
                                      SnapsToDevicePixels="True"
                                      UseLayoutRounding="True"/>
                     <TextBlock Text="KusPus"
-                               Foreground="{DynamicResource MutedText}"
+                               Foreground="{DynamicResource Mint}"
                                FontFamily="Segoe UI Variable Text, Segoe UI"
                                FontSize="13"
                                FontWeight="Medium"
