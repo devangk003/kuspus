@@ -232,7 +232,7 @@
                                  Checked="OnTabChecked" x:Name="TabAbout"/>
                 </StackPanel>
 
-                <Grid Grid.Row="1" Margin="18,8,18,14">
+                <Grid Grid.Row="1" Margin="14,8,14,14">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
@@ -242,8 +242,7 @@
                     <TextBlock x:Name="StatusLabel"
                                Grid.Column="1"
                                Text="—"
-                               Style="{StaticResource Type.MonoSm}"
-                               FontFamily="Segoe UI Variable Text, Segoe UI"
+                               Style="{StaticResource Type.SidebarStatus}"
                                Margin="8,0,0,0"
                                VerticalAlignment="Center"/>
                     <TextBlock x:Name="SidebarHotkeyGlyph"
@@ -270,9 +269,9 @@
                          owned by the wrapper instead of by a negative-margin tuck. -->
                     <StackPanel HorizontalAlignment="Left" Width="440" Margin="0,0,0,28">
                         <Grid>
+                            <!-- Hero surface (20,16 padding) per audit Wave B. -->
                             <Border x:Name="HotkeyCard"
-                                    Style="{StaticResource RowCard}"
-                                    Padding="22,20"
+                                    Style="{StaticResource Surface.Hero}"
                                     Cursor="Hand"
                                     MouseLeftButtonDown="OnHotkeyCardClick">
                                 <StackPanel>
@@ -286,10 +285,7 @@
                                                Margin="0,14,0,0"/>
                                     <TextBlock x:Name="HotkeyHint"
                                                Text="Tap the picker, then press a new chord."
-                                               FontFamily="Segoe UI Variable Text, Segoe UI"
-                                               FontSize="11"
-                                               Foreground="{DynamicResource DisabledText}"
-                                               FontStyle="Italic"
+                                               Style="{StaticResource Type.HintItalic}"
                                                Margin="0,6,0,0"/>
                                 </StackPanel>
                             </Border>
@@ -303,11 +299,7 @@
                         </Grid>
 
                         <Border x:Name="ConflictRow"
-                                Background="{DynamicResource WarningTint}"
-                                BorderBrush="{DynamicResource WarningBorder}"
-                                BorderThickness="1"
-                                CornerRadius="6"
-                                Padding="14,10"
+                                Style="{StaticResource Surface.Warning}"
                                 Margin="0,1,0,0"
                                 Visibility="Collapsed">
                             <StackPanel Orientation="Horizontal">
@@ -317,11 +309,8 @@
                                            VerticalAlignment="Center"
                                            Margin="10,0,8,0"/>
                                 <TextBlock x:Name="ConflictText"
-                                           FontFamily="Segoe UI Variable Text, Segoe UI"
-                                           FontSize="12"
-                                           Foreground="{DynamicResource PrimaryText}"
-                                           VerticalAlignment="Center"
-                                           TextWrapping="Wrap"/>
+                                           Style="{StaticResource Type.WarningBody}"
+                                           VerticalAlignment="Center"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -472,119 +461,114 @@
                                Margin="0"/>
                 </StackPanel>
 
-                <!-- ── History tab (§3.3 Tab 4 + §13.5 P1-2) ────────────────── -->
+                <!-- ── History tab — unified composed table per audit Wave F (Q3) ── -->
+                <!-- Single RowCard wraps search bar + table header + body rows + bulk
+                     footer. Inner sections use transparent backgrounds and per-section
+                     dividers so the whole thing reads as one "history widget" instead
+                     of four separately-styled blocks. -->
                 <StackPanel x:Name="ContentHistory" Visibility="Collapsed">
                     <TextBlock Style="{StaticResource SectionHeader}" Text="History"/>
 
-                    <!-- Search bar — debounced full-text against transcripts_fts. -->
-                    <Border Style="{StaticResource RowCard}" Margin="0,0,0,16" Padding="14,8">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0"
-                                       Text="&#xE721;"
-                                       FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
-                                       FontSize="14"
-                                       Foreground="{DynamicResource MutedText}"
-                                       VerticalAlignment="Center"/>
-                            <TextBox Grid.Column="1"
-                                     x:Name="HistorySearchBox"
-                                     Margin="10,0,0,0"
-                                     Padding="0,2"
-                                     BorderThickness="0"
-                                     Background="Transparent"
-                                     Foreground="{DynamicResource PrimaryText}"
-                                     CaretBrush="{DynamicResource PrimaryText}"
-                                     FontFamily="Segoe UI Variable Text, Segoe UI"
-                                     FontSize="13"
-                                     VerticalContentAlignment="Center"
-                                     TextChanged="OnHistorySearchChanged"/>
-                            <TextBlock x:Name="HistorySearchPlaceholder"
-                                       Grid.Column="1"
-                                       Text="Search transcripts…"
-                                       Margin="10,0,0,0"
-                                       Foreground="{DynamicResource MutedText}"
-                                       FontFamily="Segoe UI Variable Text, Segoe UI"
-                                       FontSize="13"
-                                       VerticalAlignment="Center"
-                                       IsHitTestVisible="False"/>
-                            <Button Grid.Column="2"
-                                    x:Name="HistorySearchClear"
-                                    Content="&#xE711;"
-                                    FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
-                                    FontSize="11"
-                                    Background="Transparent"
-                                    Foreground="{DynamicResource MutedText}"
-                                    BorderThickness="0"
-                                    Padding="6,2"
-                                    Margin="6,0,0,0"
-                                    Cursor="Hand"
-                                    Visibility="Collapsed"
-                                    Click="OnHistorySearchClearClick"/>
-                        </Grid>
-                    </Border>
+                    <Border Style="{StaticResource RowCard}" Padding="0">
+                        <StackPanel>
+                            <!-- Search bar — debounced full-text against transcripts_fts. -->
+                            <Border Padding="14,8"
+                                    BorderBrush="{DynamicResource BorderSubtle}"
+                                    BorderThickness="0,0,0,1">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0"
+                                               Text="&#xE721;"
+                                               Style="{StaticResource Type.IconSm}"
+                                               VerticalAlignment="Center"/>
+                                    <TextBox Grid.Column="1"
+                                             x:Name="HistorySearchBox"
+                                             Style="{StaticResource Input.Search}"
+                                             Margin="10,0,0,0"
+                                             TextChanged="OnHistorySearchChanged"/>
+                                    <TextBlock x:Name="HistorySearchPlaceholder"
+                                               Grid.Column="1"
+                                               Text="Search transcripts…"
+                                               Margin="10,0,0,0"
+                                               Foreground="{DynamicResource MutedText}"
+                                               FontFamily="Segoe UI Variable Text, Segoe UI"
+                                               FontSize="13"
+                                               VerticalAlignment="Center"
+                                               IsHitTestVisible="False"/>
+                                    <Button Grid.Column="2"
+                                            x:Name="HistorySearchClear"
+                                            Content="&#xE711;"
+                                            Style="{StaticResource Btn.IconGhost}"
+                                            Margin="6,0,0,0"
+                                            Visibility="Collapsed"
+                                            Click="OnHistorySearchClearClick"/>
+                                </Grid>
+                            </Border>
 
-                    <!-- Table header row. Same Grid column geometry as each body row
-                         in BuildHistoryRow so the eyebrow labels align over their data
-                         columns. Status column intentionally has no label. -->
-                    <Border Padding="14,10,14,10"
-                            BorderBrush="{DynamicResource BorderSubtle}"
-                            BorderThickness="0,0,0,1">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="14"/>
-                                <ColumnDefinition Width="78"/>
-                                <ColumnDefinition Width="110"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="72"/>
-                                <ColumnDefinition Width="52"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="1" Text="TIME"
-                                       Style="{StaticResource Type.Eyebrow}"
-                                       Margin="0,0,12,0"/>
-                            <TextBlock Grid.Column="2" Text="APP"
-                                       Style="{StaticResource Type.Eyebrow}"
-                                       Margin="0,0,12,0"/>
-                            <TextBlock Grid.Column="3" Text="TRANSCRIPT"
-                                       Style="{StaticResource Type.Eyebrow}"
-                                       Margin="0,0,12,0"/>
-                            <TextBlock Grid.Column="4" Text="MODEL"
-                                       Style="{StaticResource Type.Eyebrow}"
-                                       Margin="0,0,12,0"/>
-                            <TextBlock Grid.Column="5" Text="DUR"
-                                       Style="{StaticResource Type.Eyebrow}"
-                                       TextAlignment="Right"/>
-                        </Grid>
-                    </Border>
+                            <!-- Table header row. Same Grid geometry as each BuildHistoryRow
+                                 so the eyebrow labels align over their data columns. -->
+                            <Border Padding="14,10"
+                                    BorderBrush="{DynamicResource BorderSubtle}"
+                                    BorderThickness="0,0,0,1">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="14"/>
+                                        <ColumnDefinition Width="78"/>
+                                        <ColumnDefinition Width="110"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="72"/>
+                                        <ColumnDefinition Width="52"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="1" Text="TIME"
+                                               Style="{StaticResource Type.Eyebrow}"
+                                               Margin="0,0,12,0"/>
+                                    <TextBlock Grid.Column="2" Text="APP"
+                                               Style="{StaticResource Type.Eyebrow}"
+                                               Margin="0,0,12,0"/>
+                                    <TextBlock Grid.Column="3" Text="TRANSCRIPT"
+                                               Style="{StaticResource Type.Eyebrow}"
+                                               Margin="0,0,12,0"/>
+                                    <TextBlock Grid.Column="4" Text="MODEL"
+                                               Style="{StaticResource Type.Eyebrow}"
+                                               Margin="0,0,12,0"/>
+                                    <TextBlock Grid.Column="5" Text="DUR"
+                                               Style="{StaticResource Type.Eyebrow}"
+                                               TextAlignment="Right"/>
+                                </Grid>
+                            </Border>
 
-                    <StackPanel x:Name="HistoryList"/>
+                            <!-- Body rows. HistoryRow style already paints a 1 px
+                                 BorderDivider bottom edge per row → the last row's
+                                 bottom border IS the footer separator (no double line). -->
+                            <StackPanel x:Name="HistoryList"/>
 
-                    <!-- Bulk footer (§3.3 Tab 4 #3). -->
-                    <Border Margin="0,16,0,0"
-                            BorderBrush="{DynamicResource BorderDivider}"
-                            BorderThickness="0,1,0,0"
-                            Padding="0,16,0,0">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock x:Name="HistoryStats"
-                                       Grid.Column="0"
-                                       Text="—"
-                                       Style="{StaticResource Type.RowSubtitle}"
-                                       Margin="0"
-                                       VerticalAlignment="Center"/>
-                            <Button Grid.Column="1"
-                                    x:Name="PurgeAllButton"
-                                    Content="Purge all history"
-                                    Style="{StaticResource Btn.Danger}"
-                                    Click="OnPurgeAllClick"
-                                    VerticalAlignment="Center"/>
-                        </Grid>
+                            <!-- Bulk footer. No top border because the last HistoryRow's
+                                 bottom border already separates it from the table body. -->
+                            <Border Padding="14,12,14,12">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="HistoryStats"
+                                               Grid.Column="0"
+                                               Text="—"
+                                               Style="{StaticResource Type.RowSubtitle}"
+                                               Margin="0"
+                                               VerticalAlignment="Center"/>
+                                    <Button Grid.Column="1"
+                                            x:Name="PurgeAllButton"
+                                            Content="Purge all history"
+                                            Style="{StaticResource Btn.Danger}"
+                                            Click="OnPurgeAllClick"
+                                            VerticalAlignment="Center"/>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
                     </Border>
                 </StackPanel>
 
@@ -688,22 +672,12 @@
                         </StackPanel>
                     </Border>
 
-                    <Border Background="{DynamicResource MintTint}"
-                            BorderBrush="{DynamicResource MintBorder}"
-                            BorderThickness="1"
-                            CornerRadius="8"
-                            Padding="20,16">
+                    <Border Style="{StaticResource Surface.Mint}">
                         <StackPanel>
                             <TextBlock Text="Local-first."
-                                       FontFamily="Segoe UI Variable Text, Segoe UI"
-                                       FontSize="14"
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource Mint}"/>
+                                       Style="{StaticResource Type.MintHeadline}"/>
                             <TextBlock Text="Audio capture, transcription, and history all stay on this machine. The only network calls KusPus makes are model downloads (Models tab) and — if you opt in — anonymous crash reports."
-                                       FontFamily="Segoe UI Variable Text, Segoe UI"
-                                       FontSize="12"
-                                       Foreground="{DynamicResource PrimaryText}"
-                                       TextWrapping="Wrap"
+                                       Style="{StaticResource Type.BodySmall}"
                                        Margin="0,6,0,0"/>
                         </StackPanel>
                     </Border>
@@ -723,14 +697,12 @@
                                        Style="{StaticResource Type.Display}"/>
                             <TextBlock x:Name="AboutVersion"
                                        Text="Version —"
-                                       FontFamily="Segoe UI Variable Text, Segoe UI"
-                                       FontSize="13"
-                                       Foreground="{DynamicResource SecondaryText}"
-                                       Margin="0,4,0,0"/>
+                                       Style="{StaticResource Type.Body}"
+                                       Margin="0,3,0,0"/>
                             <TextBlock x:Name="AboutBuildLine"
                                        Text="—"
                                        Style="{StaticResource Type.MonoSm}"
-                                       Margin="0,4,0,0"/>
+                                       Margin="0,3,0,0"/>
                         </StackPanel>
                     </StackPanel>
 
@@ -780,7 +752,7 @@
                         </Grid>
                     </Border>
 
-                    <Border Style="{StaticResource RowCard}" Margin="0,0,0,32">
+                    <Border Style="{StaticResource RowCard}" Margin="0,0,0,28">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
@@ -801,15 +773,9 @@
                     </Border>
 
                     <TextBlock Text="MIT licensed · Local-first · No telemetry."
-                               FontFamily="Segoe UI Variable Text, Segoe UI"
-                               FontSize="12"
-                               FontWeight="Medium"
-                               Foreground="{DynamicResource SecondaryText}"/>
+                               Style="{StaticResource Type.Footnote}"/>
                     <TextBlock Text="Press a hotkey. Speak. Get pasted."
-                               FontFamily="Segoe UI Variable Text, Segoe UI"
-                               FontSize="11.5"
-                               FontStyle="Italic"
-                               Foreground="{DynamicResource MutedText}"
+                               Style="{StaticResource Type.HintItalic}"
                                Margin="0,4,0,0"/>
                 </StackPanel>
             </Grid>

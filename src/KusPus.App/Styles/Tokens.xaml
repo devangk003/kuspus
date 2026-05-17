@@ -1,0 +1,47 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!--
+        Canonical spacing + corner-radius token scale per docs/APP_DESIGN.md §13.5
+        audit Wave A. Centralises every Margin / Padding / CornerRadius literal
+        scattered across MainWindow, OnboardingWindow, and the row/card chrome
+        into a single named scale so future visual tweaks happen in one place.
+
+        Keys are unprefixed (sit alongside Type.* and brush keys in the merged
+        Application.Resources dictionary). File is wired into App.xaml's
+        MergedDictionaries by the orchestrator — do not touch App.xaml here.
+
+        Spacing scale (Thickness, used as Margin/Padding uniform values):
+            Space.xs   —  4   (tight intra-row gaps, dot-to-text)
+            Space.sm   —  8   (chip padding, small inter-element gap)
+            Space.md   — 14   (row internal padding, standard inter-row gap)
+            Space.lg   — 28   (section-to-section vertical rhythm)
+            Space.xl   — 36   (tab content outer padding)
+            Space.xxl  — 56   (hero block top/bottom breathing room)
+
+        Card paddings (Thickness, x then y, applied directly to a card Padding):
+            Pad.Tight    — 14,8   (table rows, search bars — denser inline data)
+            Pad.Default  — 16,14  (standard RowCard padding)
+            Pad.Hero     — 20,16  (General-tab Hotkey card, Privacy Local-first card — emphasis)
+
+        Corner radii (CornerRadius, applied to Border.CornerRadius):
+            Radius.Sm  — 4  (chips, small inline glyph backings)
+            Radius.Md  — 6  (row cards, inputs)
+            Radius.Lg  — 8  (hero cards, modals, the pill itself)
+    -->
+
+    <Thickness x:Key="Space.xs">4</Thickness>
+    <Thickness x:Key="Space.sm">8</Thickness>
+    <Thickness x:Key="Space.md">14</Thickness>
+    <Thickness x:Key="Space.lg">28</Thickness>
+    <Thickness x:Key="Space.xl">36</Thickness>
+    <Thickness x:Key="Space.xxl">56</Thickness>
+
+    <Thickness x:Key="Pad.Tight">14,8</Thickness>
+    <Thickness x:Key="Pad.Default">16,14</Thickness>
+    <Thickness x:Key="Pad.Hero">20,16</Thickness>
+
+    <CornerRadius x:Key="Radius.Sm">4</CornerRadius>
+    <CornerRadius x:Key="Radius.Md">6</CornerRadius>
+    <CornerRadius x:Key="Radius.Lg">8</CornerRadius>
+
+</ResourceDictionary>

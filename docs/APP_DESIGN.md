@@ -1506,11 +1506,11 @@ Applied first in: hotkey-picker listen-mode hint (`Now press the keys you want t
 
 | P2-7 | P2 | Verify GitHub repo URL exists at the case in About tab | `MainWindow.xaml:691` | todo |
 
-| P2-8 | P2 | Delete unreachable `(none)` empty-state branch on Models tab | `MainWindow.xaml.cs:839-841` | todo |
+| P2-8 | P2 | Delete unreachable `(none)` empty-state branch on Models tab | `MainWindow.xaml.cs:839-841` | done |
 
-| P2-9 | P2 | Empty-state for History search-with-zero-results | `MainWindow.xaml.cs:1015-1026` | todo |
+| P2-9 | P2 | Empty-state for History search-with-zero-results | `MainWindow.xaml.cs:1015-1026` | done |
 
-| P2-10 | P2 | De-duplicate "Open in Explorer" (Privacy ↔ About) | `MainWindow.xaml:616-623, 729-736` | todo |
+| P2-10 | P2 | De-duplicate "Open in Explorer" (Privacy ↔ About) | `MainWindow.xaml:616-623, 729-736` | won't fix (both surfaces give useful access; not a duplicate by user intent) |
 
 
 
@@ -1523,6 +1523,198 @@ Work waves (smaller-first, mergeable):
 2\. \*\*W2 — "design system":\*\* P1-1, P1-6, P1-7, P1-8, P1-9, P1-10. Extract reusable styles + per-tab UserControls. Every later edit becomes half as long.
 
 3\. \*\*W3 — "ship the missing UX":\*\* P0-3, P0-5, P1-2, P1-3, P1-4. Brings the window into spec-completeness — model downloads, log size + clear, history search + purge, mic disclosure.
+
+
+
+\---
+
+
+
+\## 13.6 Round 2 audit — design-system completeness
+
+
+
+Source: a second full UI/UX audit of the Preferences window dated 2026-05-17. Round 1 (§13.5) extracted the basic style set (typography, dot, button, focus, surfaces) and unified the History tab as a table. Round 2 closes the remaining gaps: token scale, surface variants for non-RowCard cards, expanded typography for every inline pattern, an `Input.Search` TextBox style, and a `Btn.IconGhost` for icon-only buttons. History tab is further unified into a single composed card.
+
+
+
+\### 13.6.1 Token system (Wave A)
+
+
+
+The canonical spacing + radius scale lives in `Styles/Tokens.xaml`. Use these resources by `{StaticResource Space.lg}` etc. rather than hand-typing values.
+
+
+
+| Resource | Value | Use |
+
+|---|---|---|
+
+| `Space.xs` | 4 | smallest gap (inside compact controls) |
+
+| `Space.sm` | 8 | label↔control, icon↔text |
+
+| `Space.md` | 14 | inter-block stack gap |
+
+| `Space.lg` | 28 | section gap |
+
+| `Space.xl` | 36 | page horizontal padding |
+
+| `Space.xxl` | 56 | large feature blocks |
+
+| `Pad.Tight` | `14,8` | table rows, search bars |
+
+| `Pad.Default` | `16,14` | standard RowCard |
+
+| `Pad.Hero` | `20,16` | emphasis cards |
+
+| `Radius.Sm` | 4 | badges, small chips |
+
+| `Radius.Md` | 6 | mid surfaces (ConflictRow) |
+
+| `Radius.Lg` | 8 | row cards, hero cards |
+
+
+
+\### 13.6.2 Surface variants (Wave B)
+
+
+
+`Styles/Surfaces.xaml` declares five Border styles. Use these in preference to declaring `Background`/`BorderBrush`/`BorderThickness`/`CornerRadius`/`Padding` inline:
+
+
+
+| Style | Use |
+
+|---|---|
+
+| `Surface.Default` | standard row card (alias of `RowCard`) |
+
+| `Surface.Hero` | emphasis card — General Hotkey, Privacy Local-first wrapper |
+
+| `Surface.Tight` | dense inline-data card — History search bar |
+
+| `Surface.Warning` | warning callout — General ConflictRow |
+
+| `Surface.Mint` | brand emphasis card — Privacy Local-first |
+
+
+
+The existing `RowCard` style (declared in MainWindow.xaml.Resources) remains as an alias until a future cluster collapses both into the `Surface.*` namespace wholesale. New surface usages should prefer `Surface.*`.
+
+
+
+\### 13.6.3 Typography roles (Wave C)
+
+
+
+`Styles/Typography.xaml` grew from 8 to 17 roles (1 deleted, 10 added). The full set, smallest-to-largest:
+
+
+
+| Role | Spec | Where |
+
+|---|---|---|
+
+| `Type.Eyebrow` | 10.5 SemiBold MutedText | section eyebrow, table-header labels |
+
+| `Type.BadgeMint` | 10.5 Medium Mint | BundledBadge label |
+
+| `Type.MonoSm` | 11 Medium MutedText mono | hotkey glyph, log path, table TIME/MODEL/DUR cells |
+
+| `Type.HintItalic` | 11 Italic DisabledText | HotkeyHint, taglines, empty states |
+
+| `Type.SidebarStatus` | 11 Regular MutedText | sidebar StatusLabel |
+
+| `Type.RowSubtitle` | 11.5 Regular MutedText Wrap | the standard row helper line |
+
+| `Type.ErrorInline` | 11.5 Medium ErrorRed | model download error |
+
+| `Type.WarningEmphasis` | 12 SemiBold WarningAmber | ConflictRow title |
+
+| `Type.WarningBody` | 12 Regular PrimaryText Wrap | ConflictRow body |
+
+| `Type.BodySmall` | 12 Regular PrimaryText Wrap | Local-first body |
+
+| `Type.Footnote` | 12 Medium SecondaryText | MIT-licensed footer |
+
+| `Type.Body` | 13 Regular SecondaryText | AboutVersion-style body |
+
+| `Type.RowTitle` | 13 Medium PrimaryText | top line of a row card |
+
+| `SectionHeader` | 13 SemiBold PrimaryText (margin 0,0,0,10) | tab section header |
+
+| `Type.IconSm` | 14 Fluent Icons MutedText | inline UI icons (search magnifier) |
+
+| `Type.MintHeadline` | 14 SemiBold Mint | Local-first card headline |
+
+| `Type.Display` | 32 SemiBold PrimaryText | About wordmark |
+
+
+
+Deleted: `Type.MonoXs` (zero call sites).
+
+
+
+\### 13.6.4 Inputs + IconGhost button (Wave D)
+
+
+
+- `Styles/Inputs.xaml` — `Input.Search` TextBox style. Transparent bg + zero border + PrimaryText caret, mint selection. Used in the History tab search box.
+
+- `Styles/Buttons.xaml` — new `Btn.IconGhost` (28×28, Fluent Icons, transparent). Used for icon-only buttons inside other surfaces (History search-clear "×").
+
+
+
+\### 13.6.5 Spacing fixes
+
+
+
+- About re-run card bottom margin `0,0,0,32` → `0,0,0,28` (matches section rhythm).
+
+- Sidebar footer Grid Margin `18,8,18,14` → `14,8,14,14` (matches sidebar StackPanel's 14 horizontal).
+
+- About header AboutVersion / AboutBuildLine Margin `0,4,0,0` → `0,3,0,0` (matches `Type.RowSubtitle`'s default gap).
+
+
+
+\### 13.6.6 History tab unification
+
+
+
+Per audit Wave F (Q3 user decision: unified single card), the History tab content is now wrapped in a single `RowCard` with `Padding="0"` containing:
+
+- search bar (Padding `14,8` + bottom divider),
+
+- table header (Padding `14,10` + bottom divider),
+
+- body rows (HistoryRow style — each row carries its own bottom divider),
+
+- bulk footer (Padding `14,12` — no top divider; the last row's bottom border is the separator).
+
+
+
+Reads as a single composed "history widget" instead of four separately-styled blocks.
+
+
+
+\### 13.6.7 Code-behind cleanup
+
+
+
+- `RenderModelsTab`: dropped the unreachable `"(none)"` fallback branch (P2-8 done).
+
+- `BuildModelRow`, `BuildBundledBadge`, `BuildModelDownloadingRegion`, `BuildModelErrorRegion`, `BuildHistoryRow` (TIME/MODEL/DUR columns), `ReloadHistoryAsync` empty-state: all use the new `Type.*` styles via the new `TypeStyle(key)` helper. Inline `FontFamily`/`FontSize`/`FontWeight`/`Foreground` quadruplets eliminated where a Type role fits exactly (~15 sites). Transcript cell + "Active"/"Installed" status text remain inline because their colour flips by state.
+
+
+
+\### 13.6.8 Dead-code policy
+
+
+
+`Btn.Primary`, `Btn.Sm`, `Btn.Lg` have zero call sites but are **deliberately retained** as design-system vocabulary. The Buttons.xaml header now documents which kinds have callers and which are reserved roles, so the dead-code scanner can distinguish "forgotten" from "reserved."
+
+
 
 
 

@@ -10,6 +10,7 @@
             Btn.Secondary  — elevated surface, primary text, subtle border        (default action)
             Btn.Ghost      — transparent background, primary text, subtle border  (tertiary action)
             Btn.Danger     — transparent background, error-red text + red border  (destructive)
+            Btn.IconGhost  — 28×28 transparent icon-only button, Fluent glyph     (in-surface icon action)
 
         Sizes (Padding + font):
             Btn.Sm         — 5 × 10 px, 11.5 px
@@ -24,6 +25,18 @@
 
         Hover: applies a brightness lift via Opacity (DropShadowEffect approach
         introduces too much extra geometry for an unnecessary effect at this size).
+
+        Current call sites (as of audit Wave D):
+            Btn.Primary    — 0 callers (reserved design-system role; instantiate when a primary CTA is needed)
+            Btn.Secondary  — 4 in MainWindow.xaml (Open in Explorer ×2, Open on GitHub, Run again) + 3 in code-behind (Models Download / Retry / Cancel-secondary)
+            Btn.Ghost      — 1 in code-behind (Models Download Cancel)
+            Btn.Danger     — 2 in MainWindow.xaml (Clear logs, Purge all history)
+            Btn.IconGhost  — 1 in MainWindow.xaml (History search-clear)
+            Btn.Sm         — 0 callers (reserved size; instantiate when a compact action is needed)
+            Btn.Lg         — 0 callers (reserved size; instantiate when a hero/CTA action is needed)
+
+        The empty roles (Btn.Primary, Btn.Sm, Btn.Lg) are deliberately retained as
+        design-system vocabulary per the audit — not dead code.
     -->
 
     <!-- ── Base sizes (TargetType Button so callers can BasedOn easily) ── -->
@@ -108,6 +121,22 @@
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderBrush" Value="#55EF5350"/>
         <Setter Property="Foreground" Value="{DynamicResource ErrorRed}"/>
+    </Style>
+
+    <!-- Small icon-only buttons inside other surfaces — e.g. the "×" clear
+         button in the History tab's search box. -->
+    <Style x:Key="Btn.IconGhost" TargetType="Button" BasedOn="{StaticResource Btn.Base}">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Foreground" Value="{DynamicResource MutedText}"/>
+        <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="Padding" Value="6,4"/>
+        <Setter Property="Width" Value="28"/>
+        <Setter Property="Height" Value="28"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
     </Style>
 
 </ResourceDictionary>

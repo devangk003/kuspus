@@ -14,13 +14,22 @@
 
         Roles, by visible size:
             Type.Display         — 32 / SemiBold   (About header wordmark)
+            Type.MintHeadline    — 14 / SemiBold   (Local-first card headline)
+            Type.IconSm          — 14 / Regular    (Segoe Fluent — search-bar magnifier)
             Type.SectionHeader   — 13 / SemiBold   (left-aligned section eyebrow inside a tab)
             Type.RowTitle        — 13 / Medium     (top line of a row card)
-            Type.RowSubtitle     — 11.5 / Regular  (helper line beneath the row title)
-            Type.Eyebrow         — 10.5 / SemiBold (e.g. HOTKEY uppercase eyebrow)
-            Type.MonoSm          — 11 / Medium     (hotkey glyph, log path, timestamps)
-            Type.MonoXs          — 10.5 / Medium   (history footer model · duration)
+            Type.Body            — 13 / Regular    (About body, AboutVersion etc.)
             Type.WarningEmphasis — 12 / SemiBold   (conflict-row title)
+            Type.Footnote        — 12 / Medium     (MIT-licensed footer)
+            Type.BodySmall       — 12 / Regular    (local-first body, wraps)
+            Type.WarningBody     — 12 / Regular    (ConflictText body, wraps)
+            Type.ErrorInline     — 11.5 / Medium   (model download error text)
+            Type.RowSubtitle     — 11.5 / Regular  (helper line beneath the row title)
+            Type.MonoSm          — 11 / Medium     (hotkey glyph, log path, timestamps)
+            Type.HintItalic      — 11 / Italic     (HotkeyHint, taglines, empty states)
+            Type.SidebarStatus   — 11 / Regular    (sidebar StatusLabel)
+            Type.BadgeMint       — 10.5 / Medium   (BundledBadge label)
+            Type.Eyebrow         — 10.5 / SemiBold (e.g. HOTKEY uppercase eyebrow)
     -->
 
     <FontFamily x:Key="Type.SansFamily">Segoe UI Variable Text, Segoe UI</FontFamily>
@@ -73,18 +82,78 @@
         <Setter Property="Foreground" Value="{DynamicResource MutedText}"/>
     </Style>
 
-    <Style x:Key="Type.MonoXs" TargetType="TextBlock">
-        <Setter Property="FontFamily" Value="{StaticResource Type.MonoFamily}"/>
-        <Setter Property="FontSize" Value="10.5"/>
-        <Setter Property="FontWeight" Value="Medium"/>
-        <Setter Property="Foreground" Value="{DynamicResource MutedText}"/>
-    </Style>
-
     <Style x:Key="Type.WarningEmphasis" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource Type.SansFamily}"/>
         <Setter Property="FontSize" Value="12"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Foreground" Value="{DynamicResource WarningAmber}"/>
+    </Style>
+
+    <Style x:Key="Type.Body" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource Type.SansFamily}"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+    </Style>
+
+    <Style x:Key="Type.BodySmall" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource Type.SansFamily}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+        <Setter Property="TextWrapping" Value="Wrap"/>
+    </Style>
+
+    <Style x:Key="Type.Footnote" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource Type.SansFamily}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontWeight" Value="Medium"/>
+        <Setter Property="Foreground" Value="{DynamicResource SecondaryText}"/>
+    </Style>
+
+    <Style x:Key="Type.HintItalic" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource Type.SansFamily}"/>
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="FontStyle" Value="Italic"/>
+        <Setter Property="Foreground" Value="{DynamicResource DisabledText}"/>
+    </Style>
+
+    <Style x:Key="Type.MintHeadline" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource Type.SansFamily}"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource Mint}"/>
+    </Style>
+
+    <Style x:Key="Type.WarningBody" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource Type.SansFamily}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+        <Setter Property="TextWrapping" Value="Wrap"/>
+    </Style>
+
+    <Style x:Key="Type.IconSm" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="Foreground" Value="{DynamicResource MutedText}"/>
+    </Style>
+
+    <Style x:Key="Type.ErrorInline" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource Type.SansFamily}"/>
+        <Setter Property="FontSize" Value="11.5"/>
+        <Setter Property="FontWeight" Value="Medium"/>
+        <Setter Property="Foreground" Value="{DynamicResource ErrorRed}"/>
+    </Style>
+
+    <Style x:Key="Type.BadgeMint" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource Type.SansFamily}"/>
+        <Setter Property="FontSize" Value="10.5"/>
+        <Setter Property="FontWeight" Value="Medium"/>
+        <Setter Property="Foreground" Value="{DynamicResource Mint}"/>
+    </Style>
+
+    <Style x:Key="Type.SidebarStatus" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource Type.SansFamily}"/>
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="Foreground" Value="{DynamicResource MutedText}"/>
     </Style>
 
 </ResourceDictionary>

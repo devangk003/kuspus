@@ -1,0 +1,43 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!--
+        Input style set per docs/APP_DESIGN.md §13.5 audit Wave D. Extracts the
+        inline TextBox styling currently inlined on MainWindow.xaml's history
+        search bar into a named, reusable role. The file is registered in
+        App.xaml's MergedDictionaries by the orchestrator (this file does NOT
+        touch App.xaml).
+
+        Roles:
+            Input.Search — 13 / Regular   (history-tab search field; chromeless,
+                                           sits inside a parent card that owns
+                                           the visible surface + focus state)
+
+        Why each setter:
+            - Background / BorderThickness / BorderBrush all neutralised: the
+              TextBox lives inside a parent card that owns the visible surface
+              and focus affordance — no double-bordering.
+            - CaretBrush + SelectionBrush bound to theme tokens via
+              DynamicResource: dark/light parity, mint selection matches the
+              brand accent.
+            - 13 px + VerticalContentAlignment=Center: matches Type.Body, sits
+              aligned with the magnifier icon and placeholder beside it.
+            - FocusVisualStyle="{x:Null}": suppresses the default WPF dotted
+              focus rectangle — the parent card's border tinting is the focus
+              signal.
+    -->
+
+    <Style x:Key="Input.Search" TargetType="TextBox">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+        <Setter Property="CaretBrush" Value="{DynamicResource PrimaryText}"/>
+        <Setter Property="SelectionBrush" Value="{DynamicResource Mint}"/>
+        <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="Padding" Value="0,2"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+    </Style>
+
+</ResourceDictionary>

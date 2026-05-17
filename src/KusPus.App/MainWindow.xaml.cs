@@ -416,6 +416,13 @@ public partial class MainWindow : Window
     private static WpfBrush Theme(string key) =>
         (WpfBrush)System.Windows.Application.Current.FindResource(key);
 
+    // Counterpart to Theme(): resolves a TextBlock Style from Application.Resources
+    // so code-built TextBlocks can pick up the canonical Type.* roles instead of
+    // re-declaring FontFamily / FontSize / FontWeight / Foreground inline.
+    // §13.5 audit Wave C.
+    private static Style TypeStyle(string key) =>
+        (Style)System.Windows.Application.Current.FindResource(key);
+
     // ── Listen mode ─────────────────────────────────────────────────────────
 
     private void OnHotkeyCardClick(object sender, MouseButtonEventArgs e)
@@ -913,10 +920,11 @@ public partial class MainWindow : Window
         var activeId = _prefs.Current.Models.ActiveModelId;
         var manifest = _models.Manifest;
 
-        var active = manifest.Models.FirstOrDefault(m => m.Id == activeId);
-        ActiveModelText.Text = active is not null
-            ? $"{active.DisplayName} · {FormatSize(active.SizeBytes)} · {SpeedLabel(active.Id)}"
-            : "(none)";
+        // §13.5 P2-8: drop the unreachable "(none)" branch — ActiveModelId is
+        // always a valid manifest id by data flow (DefaultSettings seeds it).
+        var active = manifest.Models.First(m => m.Id == activeId);
+        ActiveModelText.Text =
+            $"{active.DisplayName} · {FormatSize(active.SizeBytes)} · {SpeedLabel(active.Id)}";
 
         ModelsList.Children.Clear();
         for (int i = 0; i < manifest.Models.Count; i++)
@@ -942,15 +950,13 @@ public partial class MainWindow : Window
         radio.Checked += OnModelRadioChecked;
 
         var titleRow = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal };
-        titleRow.Children.Add(new TextBlock
+        var titleText = new TextBlock
         {
             Text = m.DisplayName,
-            FontFamily = new WpfFontFamily("Segoe UI Variable Text, Segoe UI"),
-            FontSize = 13,
-            FontWeight = FontWeights.Medium,
-            Foreground = Theme("PrimaryText"),
+            Style = TypeStyle("Type.RowTitle"),
             VerticalAlignment = VerticalAlignment.Center,
-        });
+        };
+        titleRow.Children.Add(titleText);
         if (m.Bundled)
         {
             titleRow.Children.Add(BuildBundledBadge());
@@ -959,10 +965,8 @@ public partial class MainWindow : Window
         var subtitle = new TextBlock
         {
             Text = $"{FormatSize(m.SizeBytes)} · {SpeedLabel(m.Id)}",
-            FontFamily = new WpfFontFamily("Segoe UI Variable Text, Segoe UI"),
-            FontSize = 11.5,
-            Foreground = Theme("MutedText"),
-            Margin = new Thickness(0, 3, 0, 0),
+            Style = TypeStyle("Type.RowSubtitle"),
+            // Style provides Margin 0,3,0,0; no override needed.
         };
 
         var labelStack = new StackPanel();
@@ -1012,10 +1016,7 @@ public partial class MainWindow : Window
             Child = new TextBlock
             {
                 Text = "Bundled",
-                FontFamily = new WpfFontFamily("Segoe UI Variable Text, Segoe UI"),
-                FontSize = 10.5,
-                FontWeight = FontWeights.Medium,
-                Foreground = Theme("Mint"),
+                Style = TypeStyle("Type.BadgeMint"),
             },
         };
     }
@@ -1035,6 +1036,8 @@ public partial class MainWindow : Window
         }
         if (installed)
         {
+            // Active/Installed text — color flips by state so this stays inline
+            // (no single Type.* role covers both Mint and Muted at 11.5 Medium).
             return new TextBlock
             {
                 Text = isActive ? "Active" : "Installed",
@@ -1087,9 +1090,7 @@ public partial class MainWindow : Window
         stack.Children.Add(new TextBlock
         {
             Text = $"  {ds.Percent:F0}%",
-            FontFamily = new WpfFontFamily("Cascadia Mono, Consolas, monospace"),
-            FontSize = 11,
-            Foreground = Theme("MutedText"),
+            Style = TypeStyle("Type.MonoSm"),
             VerticalAlignment = VerticalAlignment.Center,
             MinWidth = 38,
         });
@@ -1117,9 +1118,7 @@ public partial class MainWindow : Window
         stack.Children.Add(new TextBlock
         {
             Text = error,
-            FontFamily = new WpfFontFamily("Segoe UI Variable Text, Segoe UI"),
-            FontSize = 11.5,
-            Foreground = Theme("ErrorRed"),
+            Style = TypeStyle("Type.ErrorInline"),
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
             MaxWidth = 220,
@@ -1337,11 +1336,8 @@ public partial class MainWindow : Window
                     Text = query is null
                         ? "No transcripts yet. Dictate something to populate history."
                         : "No transcripts match that search.",
-                    FontFamily = new WpfFontFamily("Segoe UI Variable Text, Segoe UI"),
-                    FontSize = 12,
-                    Foreground = Theme("MutedText"),
-                    FontStyle = FontStyles.Italic,
-                    Margin = new Thickness(0, 10, 0, 0),
+                    Style = TypeStyle("Type.HintItalic"),
+                    Margin = new Thickness(14, 14, 14, 14),
                 });
             }
             // Disable Purge when there's literally nothing to purge.
@@ -1449,13 +1445,11 @@ public partial class MainWindow : Window
         Grid.SetColumn(dot, 0);
         grid.Children.Add(dot);
 
-        // Col 1 — time, mono, muted. Relative format ("2m ago" / "May 14").
+        // Col 1 — time. Mono via Type.MonoSm; full timestamp in tooltip.
         var time = new TextBlock
         {
             Text = FormatRelative(r.Timestamp),
-            FontFamily = new WpfFontFamily("Cascadia Mono, Consolas, monospace"),
-            FontSize = 11,
-            Foreground = Theme("MutedText"),
+            Style = TypeStyle("Type.MonoSm"),
             VerticalAlignment = VerticalAlignment.Center,
             ToolTip = r.Timestamp.LocalDateTime.ToString(
                 "yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture),
@@ -1464,7 +1458,9 @@ public partial class MainWindow : Window
         Grid.SetColumn(time, 1);
         grid.Children.Add(time);
 
-        // Col 2 — target app, sans, secondary. Truncates at the column width.
+        // Col 2 — target app. 12.5 Medium SecondaryText — close to Type.Footnote
+        // but Type.Footnote has no TextTrimming; inline kept here for the trim +
+        // tooltip combo. (12.5 also doesn't match the 12 px in Type.Footnote.)
         var app = new TextBlock
         {
             Text = string.IsNullOrEmpty(r.TargetApp) ? "—" : r.TargetApp,
@@ -1483,8 +1479,9 @@ public partial class MainWindow : Window
         Grid.SetColumn(app, 2);
         grid.Children.Add(app);
 
-        // Col 3 — transcript, sans, primary. Failed transcripts render italic red.
-        // ToolTip exposes the full text since we ellipsize.
+        // Col 3 — transcript. Sans 13 Regular — color flips between Primary/Error
+        // and FontStyle flips italic on failure, so this stays inline (no single
+        // Type.* role covers both color states + italic toggle).
         var transcript = new TextBlock
         {
             Text = r.Text,
@@ -1500,13 +1497,11 @@ public partial class MainWindow : Window
         Grid.SetColumn(transcript, 3);
         grid.Children.Add(transcript);
 
-        // Col 4 — model, mono, muted. Strip "ggml-" prefix to match sidebar shorthand.
+        // Col 4 — model, mono via Type.MonoSm. Strip "ggml-" prefix.
         var model = new TextBlock
         {
             Text = ShortModelId(r.Model),
-            FontFamily = new WpfFontFamily("Cascadia Mono, Consolas, monospace"),
-            FontSize = 11,
-            Foreground = Theme("MutedText"),
+            Style = TypeStyle("Type.MonoSm"),
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
             Margin = new Thickness(0, 0, 12, 0),
@@ -1514,13 +1509,11 @@ public partial class MainWindow : Window
         Grid.SetColumn(model, 4);
         grid.Children.Add(model);
 
-        // Col 5 — duration, mono, right-aligned (numeric column → tabular).
+        // Col 5 — duration, mono, right-aligned (tabular numeric).
         var duration = new TextBlock
         {
             Text = $"{r.Duration.TotalSeconds:F1}s",
-            FontFamily = new WpfFontFamily("Cascadia Mono, Consolas, monospace"),
-            FontSize = 11,
-            Foreground = Theme("MutedText"),
+            Style = TypeStyle("Type.MonoSm"),
             VerticalAlignment = VerticalAlignment.Center,
             TextAlignment = TextAlignment.Right,
         };
