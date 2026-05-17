@@ -36,11 +36,31 @@ internal static class AppPaths
         ?? Path.Combine(AppContext.BaseDirectory, "whisper");
 
     /// <summary>
-    /// Optional expected SHA-256 of <c>whisper.exe</c>. Empty/null skips the integrity
-    /// check (dev mode). Phase 12 release builds will set this from <c>SHA256SUMS</c>.
+    /// Expected SHA-256 of <c>whisper.exe</c>. Empty string ⇒ integrity check
+    /// is a no-op (dev mode). Resolution order:
+    /// <list type="number">
+    ///   <item><c>KUSPUS_WHISPER_SHA256</c> env-var override (debug-only escape hatch).</item>
+    ///   <item><c>BuildConstants.ExpectedWhisperSha256</c> embedded at build time
+    ///         by the <c>EmitWhisperShaConstant</c> MSBuild target in
+    ///         <c>KusPus.App.csproj</c> — reads <c>installer/payload/whisper/SHA256SUMS</c>
+    ///         and emits the SHA into a generated <c>WhisperSha.g.cs</c>.</item>
+    ///   <item>Empty string fallback (dev / unit-test hosts).</item>
+    /// </list>
+    /// Release builds run <c>tools/build-whisper-windows.ps1</c> first, which
+    /// populates <c>SHA256SUMS</c>, so the build constant carries the real hash.
     /// </summary>
-    public static string ExpectedWhisperSha256 =>
-        Environment.GetEnvironmentVariable("KUSPUS_WHISPER_SHA256") ?? string.Empty;
+    public static string ExpectedWhisperSha256
+    {
+        get
+        {
+            var envOverride = Environment.GetEnvironmentVariable("KUSPUS_WHISPER_SHA256");
+            if (!string.IsNullOrEmpty(envOverride))
+            {
+                return envOverride;
+            }
+            return BuildConstants.ExpectedWhisperSha256;
+        }
+    }
 
     /// <summary>
     /// Where intermediate <c>.wav</c> files live during recording. Defaults to the
