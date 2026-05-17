@@ -171,6 +171,15 @@ public partial class FloatingPillWindow : Window
     private float[]? _lastRealLevels;
     private bool _isRecording;
     private bool _renderingHooked;
+    // Phase 2: visualizer modes drive both the motion model and which content
+    // panel is shown. Off — bars silent, IdleContent (SVG+wordmark) visible.
+    // Recording — voice envelope motion, "RECORDING" label.
+    // HoverIdle — low-amplitude traveling sine, "IDLE · HOLD TO DICTATE" label.
+    private enum VisualizerMode { Off, Recording, HoverIdle }
+    private VisualizerMode _visualizerMode = VisualizerMode.Off;
+    // Phase tracker for the hover-idle traveling sine wave. Advances each frame
+    // by 2π / (2.4 s) so the wave completes a full traversal every ~2.4 s.
+    private double _hoverIdleWavePhase;
 
     // ── State machine ───────────────────────────────────────────────────────
     // Idle is a dev-override (CLAUDE.md deviation): spec §6.1 wants the pill hidden
@@ -311,6 +320,19 @@ public partial class FloatingPillWindow : Window
             : Math.Clamp((now - _lastFrameTime).TotalSeconds, 0, 0.064);
         _lastFrameTime = now;
 
+        // Hover-idle: traveling low-amplitude sine wave per Organic Pill §3 idle-
+        // visualizer cue. Per-bar phase offset 0.18 rad, amplitude 0.06-0.14, damp
+        // k≈3.5/s. Doesn't share the voice-envelope target-rolling loop.
+        if (_visualizerMode == VisualizerMode.HoverIdle)
+        {
+            _hoverIdleWavePhase += dt * (2 * Math.PI / 2.4);
+            for (int i = 0; i < BarCount; i++)
+            {
+                double s = Math.Sin(_hoverIdleWavePhase - (i * 0.18));
+                _targets[i] = 0.10 + (s * 0.04);   // ~0.06 - 0.14
+            }
+        }
+
         // Re-roll targets every 90–150 ms while recording.
         if (_isRecording && now >= _nextTargetAt)
         {
@@ -341,7 +363,7 @@ public partial class FloatingPillWindow : Window
             }
         }
 
-        if (!_isRecording)
+        if (!_isRecording && _visualizerMode != VisualizerMode.HoverIdle)
         {
             for (int i = 0; i < BarCount; i++)
             {
@@ -349,10 +371,13 @@ public partial class FloatingPillWindow : Window
             }
         }
 
-        // Damped approach with per-bar rate variation so bars don't move in lockstep.
+        // Damped approach with per-bar rate variation so bars don't move in
+        // lockstep. HoverIdle uses k≈3.5 for the spec's slow approach.
         for (int i = 0; i < BarCount; i++)
         {
-            double rate = _isRecording ? (14 + ((i % 3) * 3)) : 6;
+            double rate = _isRecording
+                ? (14 + ((i % 3) * 3))
+                : (_visualizerMode == VisualizerMode.HoverIdle ? 3.5 : 6);
             double k = 1 - Math.Exp(-rate * dt);
             _levels[i] += (_targets[i] - _levels[i]) * k;
 
@@ -504,18 +529,76 @@ public partial class FloatingPillWindow : Window
     {
         FrameworkElement? target = which switch
         {
-            PillVisual.Idle => IdleContent,
-            PillVisual.Recording => RecordingContent,
+            // Idle: which child shows depends on hover state (Phase 2). The
+            // ApplyIdleContent helper handles the per-hover swap; here we just
+            // delegate when this is an Idle-entry/exit event.
+            PillVisual.Idle => null,
+            PillVisual.Recording => VisualizerContent,
             PillVisual.Transcribing => TranscribingContent,
             PillVisual.Confirmed => ConfirmedContent,
             PillVisual.Error => ErrorContent,
             _ => null,
         };
+        if (which == PillVisual.Idle)
+        {
+            if (fadeIn)
+            {
+                // Re-evaluate idle content based on current hover state.
+                ApplyIdleContent();
+            }
+            else
+            {
+                // Fade out whichever idle child happens to be visible.
+                FadeElement(IdleContent, fadeIn: false);
+                FadeElement(VisualizerContent, fadeIn: false);
+            }
+            return;
+        }
         if (target is null)
         {
             return;
         }
 
+        // Entering a non-Idle, non-hover-idle state — make sure the visualizer
+        // mode reflects the new state.
+        if (fadeIn)
+        {
+            _visualizerMode = which == PillVisual.Recording ? VisualizerMode.Recording : VisualizerMode.Off;
+            if (which == PillVisual.Recording)
+            {
+                VisualizerLabel.Text = "RECORDING";
+            }
+        }
+        FadeElement(target, fadeIn);
+    }
+
+    // Phase 2: shows IdleContent (SVG + KusPus) when not hovered, swaps to the
+    // VisualizerContent (bars + IDLE · HOLD TO DICTATE label) on hover. Called
+    // from TransitionTo when entering Idle, and from OnPillMouseEnter/Leave
+    // while in Idle state.
+    private void ApplyIdleContent()
+    {
+        if (_currentVisual != PillVisual.Idle)
+        {
+            return;
+        }
+        if (IsMouseOver)
+        {
+            VisualizerLabel.Text = "IDLE · HOLD TO DICTATE";
+            _visualizerMode = VisualizerMode.HoverIdle;
+            FadeElement(IdleContent, fadeIn: false);
+            FadeElement(VisualizerContent, fadeIn: true);
+        }
+        else
+        {
+            _visualizerMode = VisualizerMode.Off;
+            FadeElement(VisualizerContent, fadeIn: false);
+            FadeElement(IdleContent, fadeIn: true);
+        }
+    }
+
+    private static void FadeElement(FrameworkElement target, bool fadeIn)
+    {
         target.IsHitTestVisible = fadeIn;
         var anim = new DoubleAnimation
         {
@@ -812,6 +895,8 @@ public partial class FloatingPillWindow : Window
     private void OnPillMouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
     {
         OpenDock();
+        // Phase 2: in Idle, swap SVG+wordmark → visualizer+IDLE label on hover.
+        ApplyIdleContent();
     }
 
     private void OnPillMouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
@@ -821,6 +906,7 @@ public partial class FloatingPillWindow : Window
             return;
         }
         CloseDock();
+        ApplyIdleContent();
     }
 
     private void OpenDock()
