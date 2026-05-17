@@ -1,5 +1,6 @@
-# KusPus CI — build, test, lint on every PR + push to main.
-# Phase 12 — see TECH_SPEC §31.
+# KusPus CI — build + test on every PR + push to main.
+# Phase 12 — see TECH_SPEC §31, validated against 2025 best-practices
+# research (2026-05-17).
 
 name: ci
 
@@ -8,11 +9,57 @@ on:
     branches: [main]
   pull_request:
 
+# Cancel in-flight CI when a newer commit lands on the same branch.
+# Safe on CI (not release) because each commit re-runs the suite from
+# scratch — there's no partial state to clean up.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
-  placeholder:
+  build-test:
     runs-on: windows-latest
     steps:
-      - name: Not implemented
-        run: |
-          echo "ci.yml not implemented yet (Phase 12)."
-          exit 1
+      - name: Checkout
+        uses: actions/checkout@v5
+        # Don't fetch submodules — Phase 12 downloads whisper.cpp prebuilt
+        # binaries via tools/build-whisper-windows.ps1 instead of building
+        # from third_party/whisper.cpp. Submodule is preserved in the repo
+        # for source-audit purposes but isn't needed for CI.
+        with:
+          submodules: false
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Build.props') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build (Debug, zero warnings tolerated)
+        # Directory.Build.props sets TreatWarningsAsErrors=true so any new
+        # analyzer rule firing on master fails CI immediately.
+        run: dotnet build --configuration Debug --no-restore
+
+      - name: Test
+        run: dotnet test --configuration Debug --no-build --logger "trx;LogFileName=test-results.trx"
+
+      - name: Upload test results
+        if: always()  # publish even on test failure so the report is browsable
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/test-results.trx'
+          retention-days: 14

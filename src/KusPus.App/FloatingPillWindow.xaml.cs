@@ -1114,6 +1114,15 @@ public partial class FloatingPillWindow : Window
 
     private void OpenDock()
     {
+        // Snap pill's bottom corners to square so the pill+dock seam reads as
+        // one continuous shape. Top corners stay 8 px rounded (Radius.Lg).
+        // Snap (not animate) since CornerRadius isn't a natively animatable
+        // WPF DependencyProperty without a custom animation; the snap happens
+        // BEFORE the dock slide-in so the bottom edge is flat the whole time
+        // the dock is becoming visible. Per pill UI request 2026-05-17.
+        // OnPillMouseEnter / OnPinClick are the only callers; both already
+        // gate on !_isPinned so pinned-mode CornerRadius is never touched.
+        PillSurface.CornerRadius = new CornerRadius(8, 8, 0, 0);
         AnimateWindowSize(width: PillExpandedWidth, height: WindowExpandedHeight, dockShowing: true);
         AnimateDockDrawer(visible: true);
         AnimateCornerButtons(visible: true);
@@ -1121,6 +1130,11 @@ public partial class FloatingPillWindow : Window
 
     private void CloseDock()
     {
+        // Restore pill's full 8 px rounded corners. Snap at start of CloseDock —
+        // the brief overlap between the round bottom and the still-visible
+        // dock is during a fade/slide-out animation, so the artifact is
+        // visually subordinate to the "going away" cue.
+        PillSurface.CornerRadius = new CornerRadius(8);
         AnimateWindowSize(width: PillCollapsedWidth, height: WindowCollapsedHeight, dockShowing: false);
         AnimateDockDrawer(visible: false);
         AnimateCornerButtons(visible: false);
@@ -1238,16 +1252,26 @@ public partial class FloatingPillWindow : Window
 
     private void UpdateRecordGlyph(PillVisual state)
     {
-        // RadiusX=4 + W=8 renders as a circle (radius = half side). Drop the
-        // radius to 1.5 and it reads as a filled rounded square — the canonical
-        // "press to stop" affordance. Mirror the change on the compact corner
-        // record button so both icons stay in sync.
+        // Both record glyphs (dock + compact corner) follow the same state
+        // pattern: grey dot when idle (tap to start), red rounded-square when
+        // recording (tap to stop). Per user dogfood feedback 2026-05-17.
         bool recording = state == PillVisual.Recording;
-        double r = recording ? 1.5 : 4;
-        RecordGlyph.RadiusX = r;
-        RecordGlyph.RadiusY = r;
-        CompactRecordGlyph.RadiusX = r;
-        CompactRecordGlyph.RadiusY = r;
+        var brush = recording
+            ? (System.Windows.Media.Brush)new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromRgb(0xEF, 0x53, 0x50))
+            : (System.Windows.Media.Brush)System.Windows.Application.Current.FindResource("MutedText");
+
+        // Dock record glyph (8×8): full-circle dot ↔ rounded square.
+        double rDock = recording ? 1.5 : 4;
+        RecordGlyph.RadiusX = rDock;
+        RecordGlyph.RadiusY = rDock;
+        RecordGlyph.Fill = brush;
+
+        // Compact corner record glyph (10×10).
+        double rCompact = recording ? 2 : 5;
+        CompactRecordGlyph.RadiusX = rCompact;
+        CompactRecordGlyph.RadiusY = rCompact;
+        CompactRecordGlyph.Fill = brush;
     }
 
     private void OnRecordToggleClick(object sender, RoutedEventArgs e)
@@ -1268,14 +1292,13 @@ public partial class FloatingPillWindow : Window
 
     private void ShowRecordNudge()
     {
-        // 10s display. Sole dismissal path — the earlier "auto-dismiss when
-        // state == Recording" rule was wrong: ToggleFromTray flips the FSM
-        // to Recording within a few ms of the click, so the nudge popped
-        // and vanished before the user could read it. A pure timer is the
-        // correct gate for an informational hint.
+        // 2s display per user feedback — 10s was too long and lingered after
+        // the user had already moved on. The dismiss-on-Recording rule that
+        // killed the earlier 6s/3s nudges was removed; pure timer is the
+        // sole dismissal path.
         _nudgeTimer?.Stop();
         RecordNudgePopup.IsOpen = true;
-        _nudgeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
+        _nudgeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _nudgeTimer.Tick += (_, _) =>
         {
             _nudgeTimer?.Stop();

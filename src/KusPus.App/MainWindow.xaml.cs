@@ -190,9 +190,17 @@ public partial class MainWindow : Window
         var info = asm.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>();
         var version = info?.InformationalVersion ?? asm.GetName().Version?.ToString() ?? "—";
         AboutVersion.Text = $"Version {version}";
-        var built = System.IO.File.GetLastWriteTime(asm.Location)
-            .ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
-        AboutBuildLine.Text = $"Built {built} · dev build";
+        // Use the launcher EXE's path via AppContext.BaseDirectory — Assembly.Location
+        // returns empty in single-file published apps (IL3000). The launcher .exe
+        // sits at BaseDirectory\KusPus.exe; its mtime is a good proxy for "when this
+        // build was produced". Falls back to "dev build" if the file doesn't exist
+        // (e.g. running from a unit test host).
+        var launcherPath = System.IO.Path.Combine(System.AppContext.BaseDirectory, "KusPus.exe");
+        var builtLine = System.IO.File.Exists(launcherPath)
+            ? System.IO.File.GetLastWriteTime(launcherPath)
+                .ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture)
+            : "—";
+        AboutBuildLine.Text = $"Built {builtLine} · dev build";
         AboutLogsPath.Text = AppPaths.LogsDir;
 
         _loaded = true;
