@@ -972,6 +972,10 @@ public partial class FloatingPillWindow : Window
     private static readonly Duration PinRotate = new(TimeSpan.FromMilliseconds(220));
 
     private bool _isPinned;
+    // True while the mic-chooser popup is open. Treated as "pinned for hover"
+    // so the dock doesn't auto-close mid-pick (cursor enters the popup → pill
+    // MouseLeave would otherwise fire and slam the dock shut).
+    private bool _pickerOpen;
     private IPrefsStoreBridge? _prefsBridge;
     private IAudioRecorderBridge? _audioBridge;
     // Phase 3 — personality animations.
@@ -1027,7 +1031,10 @@ public partial class FloatingPillWindow : Window
 
     private void OnPillMouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
     {
-        if (_isPinned)
+        // Don't close while the user has the mic chooser open — moving the
+        // cursor over the popup fires the pill's MouseLeave (documented WPF
+        // behaviour). Popup's Closed handler re-evaluates on close.
+        if (_isPinned || _pickerOpen)
         {
             return;
         }
@@ -1035,28 +1042,66 @@ public partial class FloatingPillWindow : Window
         ApplyIdleContent();
     }
 
+    private const double PillCollapsedWidth = 200;
+    private const double PillExpandedWidth = 320;
+    private const double WindowCollapsedHeight = 56;
+    private const double WindowExpandedHeight = 78;
+
     private void OpenDock()
     {
-        AnimateWindowSize(width: 320, height: 78, dockShowing: true);
+        AnimateWindowSize(width: PillExpandedWidth, height: WindowExpandedHeight, dockShowing: true);
         AnimateDockDrawer(visible: true);
         AnimateCornerButtons(visible: true);
     }
 
     private void CloseDock()
     {
-        AnimateWindowSize(width: 200, height: 56, dockShowing: false);
+        AnimateWindowSize(width: PillCollapsedWidth, height: WindowCollapsedHeight, dockShowing: false);
         AnimateDockDrawer(visible: false);
         AnimateCornerButtons(visible: false);
     }
 
     private void AnimateWindowSize(double width, double height, bool dockShowing)
     {
-        // Animate both Width and Height so Mica stays tight to the visible
-        // chrome and the window doesn't briefly clip the dock during the slide.
+        // Fixes per the WPF window-animation research:
+        // 1. Center-expand: when Width grows by ΔW, Left must shrink by ΔW/2 so
+        //    the pill expands symmetrically (default WPF animates Width only —
+        //    right edge moves while left stays put). User audit feedback.
+        // 2. Height-stuck bug: animating Window.Height with WindowStyle="None"
+        //    is documented as "part WPF / part native" (see Microsoft Learn
+        //    forum thread + Pixel-in-Gene blog). The animated value can fail
+        //    to sync back to the OS window. Fix: FillBehavior=Stop on the
+        //    Width/Height animations + a Completed handler that explicitly
+        //    clears the animation clock and assigns the final value.
         var ease = new CubicEase { EasingMode = dockShowing ? EasingMode.EaseOut : EasingMode.EaseIn };
         var dur = dockShowing ? DockSlideIn : DockSlideOut;
-        BeginAnimation(WidthProperty, new DoubleAnimation { To = width, Duration = dur, EasingFunction = ease });
-        BeginAnimation(HeightProperty, new DoubleAnimation { To = height, Duration = dur, EasingFunction = ease });
+
+        double deltaW = width - Width;
+        double targetLeft = Left - (deltaW / 2.0);
+
+        AnimateWindowProperty(WidthProperty, width, dur, ease);
+        AnimateWindowProperty(HeightProperty, height, dur, ease);
+        AnimateWindowProperty(LeftProperty, targetLeft, dur, ease);
+    }
+
+    private void AnimateWindowProperty(DependencyProperty prop, double to, Duration dur, IEasingFunction ease)
+    {
+        var anim = new DoubleAnimation
+        {
+            To = to,
+            Duration = dur,
+            EasingFunction = ease,
+            FillBehavior = FillBehavior.Stop,
+        };
+        anim.Completed += (_, _) =>
+        {
+            // Clear the animation clock so the property's local value takes
+            // effect, then assign the target value. Without this the OS-side
+            // window stays at the animated value (WPF/native split bug).
+            BeginAnimation(prop, null);
+            SetValue(prop, to);
+        };
+        BeginAnimation(prop, anim);
     }
 
     private void AnimateDockDrawer(bool visible)
@@ -1123,13 +1168,21 @@ public partial class FloatingPillWindow : Window
             return;
         }
         BuildMicChooserList();
+        _pickerOpen = true;
         MicChooserPopup.IsOpen = true;
     }
 
     private void OnMicChooserPopupClosed(object? sender, EventArgs e)
     {
-        // Refresh the chooser button label to reflect any new selection.
+        _pickerOpen = false;
         UpdateMicChooserLabel();
+        // If the cursor isn't over the pill any more (user picked a device and
+        // moved away), close the dock now that the popup-pin lock is released.
+        if (!IsMouseOver && !_isPinned)
+        {
+            CloseDock();
+            ApplyIdleContent();
+        }
     }
 
     private void BuildMicChooserList()
@@ -1193,10 +1246,13 @@ public partial class FloatingPillWindow : Window
 
     private static ControlTemplate BuildMicChooserItemTemplate()
     {
-        // Plain rounded background + hover tint, no chrome.
+        // Rounded surface with explicit hover tint trigger so non-selected
+        // items get a HoverSubtle background as the cursor passes over —
+        // selected items keep their MintTint (set inline by BuildMicChooserItem).
         var template = new ControlTemplate(typeof(System.Windows.Controls.Button));
         var border = new FrameworkElementFactory(typeof(Border));
-        border.SetValue(Border.CornerRadiusProperty, new CornerRadius(4));
+        border.Name = "ItemBg";
+        border.SetValue(Border.CornerRadiusProperty, new CornerRadius(5));
         border.SetBinding(Border.BackgroundProperty,
             new System.Windows.Data.Binding("Background")
             {
@@ -1207,6 +1263,16 @@ public partial class FloatingPillWindow : Window
         content.SetValue(ContentPresenter.VerticalAlignmentProperty, System.Windows.VerticalAlignment.Center);
         border.AppendChild(content);
         template.VisualTree = border;
+
+        // Hover trigger — only takes effect when the parent's Background is
+        // Transparent (non-selected items). Selected items already have an
+        // opaque MintTint so the hover layer is masked by it.
+        var hoverTrigger = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
+        hoverTrigger.Setters.Add(new Setter(
+            Border.BackgroundProperty,
+            (System.Windows.Media.Brush)System.Windows.Application.Current.FindResource("HoverSubtle"),
+            "ItemBg"));
+        template.Triggers.Add(hoverTrigger);
         return template;
     }
 

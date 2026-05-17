@@ -138,9 +138,12 @@ internal static class ThemeTokens
 
     private static System.Windows.Media.LinearGradientBrush BuildPillSurfaceGradient(ThemeApply.Mode mode)
     {
+        // Light theme stops now carry a subtle mint shift at the bottom
+        // (#EAF4EE) to echo the icon.svg's pearly-mint gradient — per the user
+        // audit ask. Dark theme unchanged.
         var (top, bottom) = mode == ThemeApply.Mode.Dark
-            ? (FromHex("#E0262628"), FromHex("#EB1C1C1E"))   // dark §3.1
-            : (FromHex("#E6F8F8FA"), FromHex("#EBEEEEF2"));  // light §3.2
+            ? (FromHex("#E0262628"), FromHex("#EB1C1C1E"))
+            : (FromHex("#E8F4F8F4"), FromHex("#EDE0F0E6"));
         return new System.Windows.Media.LinearGradientBrush(
             new System.Windows.Media.GradientStopCollection
             {

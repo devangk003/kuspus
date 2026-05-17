@@ -283,12 +283,13 @@
         </Border>
 
         <!-- ── DOCK DRAWER (row 1) ────────────────────────────────────────── -->
-        <!-- Sits flush against the bottom of the pill. Hidden by default (slides
-             up behind the pill + fades out). On hover (or pinned): slides down
-             + fades in. Background matches the pill's translucent surface so
-             it reads as one continuous chrome. -->
+        <!-- Insets 24 px from each side of the pill so it reads as a nested
+             sub-element instead of a flush continuation. Sits below the pill.
+             Hidden by default (slides up behind + fades out). On hover (or
+             pinned): slides down + fades in. -->
         <Border x:Name="DockDrawer"
                 Grid.Row="1"
+                Margin="24,0,24,0"
                 Background="{DynamicResource PillSurface}"
                 BorderBrush="{DynamicResource PillBorder}"
                 BorderThickness="1,0,1,1"
@@ -397,22 +398,31 @@
                     </Grid>
                 </Button>
 
-                <!-- Mic chooser popup — populated lazily on first open. -->
+                <!-- Mic chooser popup — fully restyled to match the design-system
+                     Surface tokens. ScrollViewer set to PanningMode=VerticalOnly +
+                     ScrollViewer.HorizontalScrollBarVisibility=Disabled so no
+                     default Windows-chrome scrollbar leaks through (the dotnet/wpf
+                     popup default chrome bleed). DropShadowEffect kept off per
+                     the Phase 0 perf research. -->
                 <Popup x:Name="MicChooserPopup"
                        PlacementTarget="{Binding ElementName=MicChooserButton}"
                        Placement="Top"
                        StaysOpen="False"
                        AllowsTransparency="True"
                        PopupAnimation="Fade"
-                       VerticalOffset="-4"
+                       VerticalOffset="-6"
                        Closed="OnMicChooserPopupClosed">
                     <Border Background="{DynamicResource Surface}"
                             BorderBrush="{DynamicResource BorderStrong}"
                             BorderThickness="1"
-                            CornerRadius="6"
-                            MinWidth="220"
-                            MaxHeight="240">
-                        <ScrollViewer>
+                            CornerRadius="8"
+                            MinWidth="240"
+                            MaxHeight="260"
+                            Padding="4">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      PanningMode="VerticalOnly"
+                                      Focusable="False">
                             <StackPanel x:Name="MicChooserList"/>
                         </ScrollViewer>
                     </Border>
