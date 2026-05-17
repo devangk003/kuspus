@@ -8,10 +8,12 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using KusPus.Audio;
 using KusPus.Core.Hotkeys;
 using KusPus.Core.Settings;
 using KusPus.Native;
 using KusPus.Persistence;
+using KusPus.Whisper;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using CoreVK = KusPus.Core.Hotkeys.VirtualKey;
@@ -32,6 +34,9 @@ namespace KusPus.App;
 /// UserControl to deduplicate. Same applies to the mic meter (WasapiCapture +
 /// peak compute + fill width).
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Microsoft.Design", "CA1001:Types that own disposable fields should be disposable",
+    Justification = "WPF Window owns its disposable fields (CTS, capture, enumerator) via OnClosed; making the Window IDisposable would conflict with WPF's lifecycle model (same pattern as App.xaml.cs and MainWindow.xaml.cs).")]
 public partial class OnboardingWindow : Window
 {
     private const int StepCount = 7;
@@ -39,6 +44,9 @@ public partial class OnboardingWindow : Window
 
     private readonly IPrefsStore _prefs;
     private readonly IHotkeyEngine _hotkey;
+    private readonly IAudioRecorder _audio;
+    private readonly IWhisperRunner _whisper;
+    private readonly IModelManager _models;
     private readonly ILogger<OnboardingWindow> _logger;
 
     private int _currentStep;
@@ -63,10 +71,19 @@ public partial class OnboardingWindow : Window
     // Try-it (step 6).
     private DispatcherTimer? _tryItTimer;
 
-    public OnboardingWindow(IPrefsStore prefs, IHotkeyEngine hotkey, ILogger<OnboardingWindow>? logger = null)
+    public OnboardingWindow(
+        IPrefsStore prefs,
+        IHotkeyEngine hotkey,
+        IAudioRecorder audio,
+        IWhisperRunner whisper,
+        IModelManager models,
+        ILogger<OnboardingWindow>? logger = null)
     {
         _prefs = prefs;
         _hotkey = hotkey;
+        _audio = audio;
+        _whisper = whisper;
+        _models = models;
         _logger = logger ?? NullLogger<OnboardingWindow>.Instance;
         InitializeComponent();
         SourceInitialized += OnSourceInitialized;
@@ -782,37 +799,174 @@ public partial class OnboardingWindow : Window
         }
     }
 
-    // ── Step 6 · Try it (simulation) ────────────────────────────────────────
+    // ── Step 6 · Try it (real dictation) ────────────────────────────────────
+    //
+    // Mirrors MainWindow.RunTestTranscriptionAsync: 5 s countdown record →
+    // whisper transcribe → render text. Per user dogfood feedback (2026-05-17)
+    // the prior simulation was misleading — onboarding needs to actually
+    // exercise the audio+whisper path so a broken mic / missing model surfaces
+    // before the user finishes setup, not after.
 
-    private static readonly string[] SimulatedSentences =
-    [
-        "Hello, this is what your transcripts will look like in KusPus.",
-        "Press the hotkey, talk for a few seconds, release — and the text pastes wherever your cursor is.",
-        "Local-first dictation means nothing leaves your machine.",
-    ];
+    private enum TryItState { Idle, Recording, Transcribing }
+    private TryItState _tryItState = TryItState.Idle;
+    private int _tryItCountdownRemaining;
+    private System.Threading.CancellationTokenSource? _tryItCts;
 
-    private void OnTryItSimulateClick(object sender, RoutedEventArgs e)
+    private async void OnTryItSimulateClick(object sender, RoutedEventArgs e)
     {
-        TryItEmpty.Text = "Listening…";
+        if (_tryItState is TryItState.Recording or TryItState.Transcribing)
+        {
+            // In-flight → cancel.
+            _tryItCts?.Cancel();
+            return;
+        }
+        await RunTryItDictationAsync().ConfigureAwait(true);
+    }
+
+    private async System.Threading.Tasks.Task RunTryItDictationAsync()
+    {
+        _tryItCts = new System.Threading.CancellationTokenSource();
+        var ct = _tryItCts.Token;
+
+        // Resolve the active model before opening the mic — fast-fail if missing
+        // (covers the "user skipped model download" case without a confusing
+        // generic error after the 5 s wait).
+        var modelId = _prefs.Current.Models.ActiveModelId;
+        var customPath = _prefs.Current.Models.CustomModelPath;
+        var resolved = _models.Resolve(modelId, customPath);
+        if (!resolved.Success)
+        {
+            SetTryItError(resolved.Error ?? "Active model unavailable.");
+            return;
+        }
+
+        try
+        {
+            SetTryItState(TryItState.Recording, "Recording… 5 seconds");
+            var startResult = await _audio.StartAsync(ct).ConfigureAwait(true);
+            if (!startResult.Success)
+            {
+                SetTryItError(startResult.Error ?? "Mic open failed.");
+                return;
+            }
+
+            StartTryItCountdown();
+            await System.Threading.Tasks.Task.Delay(System.TimeSpan.FromSeconds(5), ct).ConfigureAwait(true);
+            StopTryItCountdown();
+
+            var stopResult = await _audio.StopAsync().ConfigureAwait(true);
+            if (!stopResult.Success)
+            {
+                SetTryItError(stopResult.Error ?? "Mic stop failed.");
+                return;
+            }
+
+            SetTryItState(TryItState.Transcribing, "Transcribing…");
+            var transcript = await _whisper
+                .TranscribeAsync(stopResult.Value!.WavPath, resolved.Value!, ct)
+                .ConfigureAwait(true);
+
+            try { File.Delete(stopResult.Value.WavPath); }
+            catch (IOException) { /* best-effort cleanup of the temp wav */ }
+
+            if (!transcript.Success)
+            {
+                SetTryItError(transcript.Error ?? "Transcribe failed.");
+                return;
+            }
+
+            var text = string.IsNullOrWhiteSpace(transcript.Value)
+                ? "(no speech detected)"
+                : transcript.Value!.Trim();
+            SetTryItResult(text);
+        }
+        catch (System.OperationCanceledException)
+        {
+            StopTryItCountdown();
+            try { await _audio.StopAsync().ConfigureAwait(true); }
+            catch (System.InvalidOperationException) { /* already stopped */ }
+            SetTryItState(TryItState.Idle, "Your transcript will appear here.");
+        }
+        catch (System.Exception ex) when (ex is IOException or System.InvalidOperationException)
+        {
+#pragma warning disable CA1848, CA1873
+            _logger.LogWarning(ex, "Onboarding try-it dictation failed unexpectedly.");
+#pragma warning restore CA1848, CA1873
+            SetTryItError("Unexpected error — see logs.");
+        }
+        finally
+        {
+            _tryItCts?.Dispose();
+            _tryItCts = null;
+        }
+    }
+
+    private void SetTryItState(TryItState next, string emptyText)
+    {
+        _tryItState = next;
+        TryItEmpty.Text = emptyText;
         TryItEmpty.Visibility = Visibility.Visible;
         TryItContent.Visibility = Visibility.Collapsed;
-        TryItSimulate.IsEnabled = false;
-        // §4.4 step 6: ~1.8 s before the sample appears.
+        TryItSimulate.Content = next switch
+        {
+            TryItState.Recording => "Stop",
+            TryItState.Transcribing => "Working…",
+            _ => "Record dictation",
+        };
+        TryItSimulate.IsEnabled = next != TryItState.Transcribing;
+        TryItClear.Visibility = Visibility.Collapsed;
+        TryItBorderBrush.Color = next == TryItState.Recording
+            ? System.Windows.Media.Color.FromArgb(0xCC, 0x4D, 0xDB, 0xA6)
+            : ((SolidColorBrush)FindResource("BorderStrong")).Color;
+    }
+
+    private void SetTryItResult(string text)
+    {
+        _tryItState = TryItState.Idle;
+        TryItContent.Text = text;
+        TryItEmpty.Visibility = Visibility.Collapsed;
+        TryItContent.Visibility = Visibility.Visible;
+        TryItSimulate.Content = "Try another";
+        TryItSimulate.IsEnabled = true;
+        TryItClear.Visibility = Visibility.Visible;
+        TryItBorderBrush.Color = ((SolidColorBrush)FindResource("Mint")).Color;
+    }
+
+    private void SetTryItError(string error)
+    {
+        _tryItState = TryItState.Idle;
+        TryItContent.Text = error;
+        TryItEmpty.Visibility = Visibility.Collapsed;
+        TryItContent.Visibility = Visibility.Visible;
+        TryItContent.Foreground = (SolidColorBrush)FindResource("ErrorRed");
+        TryItSimulate.Content = "Record dictation";
+        TryItSimulate.IsEnabled = true;
+        TryItClear.Visibility = Visibility.Visible;
+        TryItBorderBrush.Color = ((SolidColorBrush)FindResource("ErrorRed")).Color;
+    }
+
+    private void StartTryItCountdown()
+    {
+        _tryItCountdownRemaining = 5;
         _tryItTimer?.Stop();
-        _tryItTimer = new DispatcherTimer { Interval = System.TimeSpan.FromMilliseconds(1800) };
+        _tryItTimer = new DispatcherTimer { Interval = System.TimeSpan.FromSeconds(1) };
         _tryItTimer.Tick += (_, _) =>
         {
-            _tryItTimer?.Stop();
-            var pick = SimulatedSentences[new System.Random().Next(SimulatedSentences.Length)];
-            TryItContent.Text = pick;
-            TryItEmpty.Visibility = Visibility.Collapsed;
-            TryItContent.Visibility = Visibility.Visible;
-            TryItSimulate.IsEnabled = true;
-            TryItSimulate.Content = "Try another";
-            TryItClear.Visibility = Visibility.Visible;
-            TryItBorderBrush.Color = ((SolidColorBrush)FindResource("Mint")).Color;
+            _tryItCountdownRemaining--;
+            if (_tryItCountdownRemaining <= 0)
+            {
+                _tryItTimer?.Stop();
+                return;
+            }
+            TryItEmpty.Text = $"Recording… {_tryItCountdownRemaining} second{(_tryItCountdownRemaining == 1 ? "" : "s")}";
         };
         _tryItTimer.Start();
+    }
+
+    private void StopTryItCountdown()
+    {
+        _tryItTimer?.Stop();
+        _tryItTimer = null;
     }
 
     private void OnTryItClearClick(object sender, RoutedEventArgs e)
@@ -820,7 +974,9 @@ public partial class OnboardingWindow : Window
         TryItEmpty.Text = "Your transcript will appear here.";
         TryItEmpty.Visibility = Visibility.Visible;
         TryItContent.Visibility = Visibility.Collapsed;
-        TryItSimulate.Content = "Simulate dictation";
+        TryItContent.Foreground = (SolidColorBrush)FindResource("PrimaryText");
+        TryItSimulate.Content = "Record dictation";
+        TryItSimulate.IsEnabled = true;
         TryItClear.Visibility = Visibility.Collapsed;
         TryItBorderBrush.Color = ((SolidColorBrush)FindResource("BorderStrong")).Color;
     }

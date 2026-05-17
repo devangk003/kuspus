@@ -366,7 +366,8 @@
                                     <RadioButton x:Name="ThemeLight"
                                                  Style="{StaticResource SegmentButton}"
                                                  GroupName="Theme"
-                                                 Content="Light"
+                                                 Content="Light [BETA]"
+                                                 ToolTip="Light theme is in beta — some surfaces aren't fully tuned yet."
                                                  Checked="OnThemeChanged"/>
                                     <RadioButton x:Name="ThemeDark"
                                                  Style="{StaticResource SegmentButton}"

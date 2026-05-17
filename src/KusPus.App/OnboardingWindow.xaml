@@ -435,7 +435,7 @@
                                    FontSize="22" FontWeight="SemiBold"
                                    Foreground="{DynamicResource PrimaryText}"
                                    Margin="0,6,0,8"/>
-                        <TextBlock Text="Press the hotkey, say one sentence, then release. Or click Simulate dictation for a canned example."
+                        <TextBlock Text="Click Record below, say one sentence, and KusPus will transcribe it using your active model. Take as long as you like — Record again to stop early, or wait the 5 second timer."
                                    FontFamily="Segoe UI Variable Text, Segoe UI"
                                    FontSize="13"
                                    Foreground="{DynamicResource SecondaryText}"
@@ -477,7 +477,7 @@
 
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                             <Button x:Name="TryItSimulate"
-                                    Content="Simulate dictation"
+                                    Content="Record dictation"
                                     Click="OnTryItSimulateClick"
                                     Padding="14,7"
                                     Background="{DynamicResource Mint}"

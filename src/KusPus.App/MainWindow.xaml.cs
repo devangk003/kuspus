@@ -2471,7 +2471,7 @@ public partial class MainWindow : Window
 
     private void OnRerunOnboardingClick(object sender, RoutedEventArgs e)
     {
-        var window = new OnboardingWindow(_prefs, _hotkey)
+        var window = new OnboardingWindow(_prefs, _hotkey, _audio, _whisper, _models)
         {
             Owner = this,
         };

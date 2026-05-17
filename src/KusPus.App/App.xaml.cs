@@ -163,6 +163,9 @@ public partial class App : System.Windows.Application
                 var window = new OnboardingWindow(
                     _services.GetRequiredService<IPrefsStore>(),
                     _services.GetRequiredService<IHotkeyEngine>(),
+                    _services.GetRequiredService<IAudioRecorder>(),
+                    _services.GetRequiredService<IWhisperRunner>(),
+                    _services.GetRequiredService<IModelManager>(),
                     _services.GetService<ILogger<OnboardingWindow>>());
                 window.ShowDialog();
             }));

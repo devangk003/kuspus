@@ -46,8 +46,12 @@ public sealed record ModelSettings
 
 public sealed record UiSettings
 {
-    /// <summary>One of <c>auto</c>, <c>light</c>, <c>dark</c>.</summary>
-    public string Theme { get; init; } = "auto";
+    /// <summary>
+    /// One of <c>auto</c>, <c>light</c>, <c>dark</c>. Default is <c>dark</c>
+    /// per user dogfood feedback (2026-05-17) — the light theme is still in
+    /// beta polish, so new installs land on the polished dark surface.
+    /// </summary>
+    public string Theme { get; init; } = "dark";
 
     public string PillPosition { get; init; } = "bottom-center";
 }

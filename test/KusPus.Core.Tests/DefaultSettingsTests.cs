@@ -24,7 +24,9 @@ public class DefaultSettingsTests
         s.Models.ActiveModelId.Should().Be("ggml-tiny.en");
         s.Models.CustomModelPath.Should().BeNull();
 
-        s.Ui.Theme.Should().Be("auto");
+        // Default flipped from "auto" → "dark" on 2026-05-17 per user dogfood
+        // feedback (light theme is in beta polish, new installs land dark).
+        s.Ui.Theme.Should().Be("dark");
         s.Ui.PillPosition.Should().Be("bottom-center");
 
         s.History.Enabled.Should().BeTrue();
