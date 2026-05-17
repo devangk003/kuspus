@@ -154,9 +154,12 @@ public partial class OnboardingWindow : Window
         UpdateProgressDots();
 
         // Mic check only runs while step 3 is showing — same on/off pattern as
-        // the MainWindow Audio tab.
+        // the MainWindow Audio tab. Populate the device combo FIRST so the
+        // closed-state Text + selection match the persisted device id before
+        // the capture session opens.
         if (index == 2)
         {
+            PopulateOnbInputDeviceCombo();
             StartMicCheck();
         }
         else
@@ -591,9 +594,9 @@ public partial class OnboardingWindow : Window
         try
         {
             _mmEnumerator ??= new NAudio.CoreAudioApi.MMDeviceEnumerator();
-            var device = _mmEnumerator.GetDefaultAudioEndpoint(
-                NAudio.CoreAudioApi.DataFlow.Capture,
-                NAudio.CoreAudioApi.Role.Communications);
+            // Use the user's saved device (mirrors MainWindow.ResolveLevelMeterDevice)
+            // so the onboarding meter reflects whichever mic Preferences would.
+            var device = ResolveOnbMicDevice(_mmEnumerator, _prefs.Current.Audio.InputDeviceId);
             MicDeviceLabel.Text = (device.FriendlyName ?? "MICROPHONE").ToUpperInvariant();
 
             var capture = new NAudio.CoreAudioApi.WasapiCapture(device);
@@ -979,5 +982,143 @@ public partial class OnboardingWindow : Window
         TryItSimulate.IsEnabled = true;
         TryItClear.Visibility = Visibility.Collapsed;
         TryItBorderBrush.Color = ((SolidColorBrush)FindResource("BorderStrong")).Color;
+    }
+
+    // ── Step 3 · Input device chooser ──────────────────────────────────────
+    // Wires the same PrefsStore.Audio.InputDeviceId field that Preferences →
+    // Audio uses. Selection persists until the user changes it from either
+    // surface (or unplugs the device, in which case Resolve falls back to
+    // the OS default). Logic mirrors MainWindow's combo with no shared base
+    // class — onboarding is short-lived and a single-window helper would
+    // pull in more ceremony than it removes.
+
+    private sealed class OnbInputDeviceItem
+    {
+        public string? Id { get; init; }
+        public string Display { get; init; } = string.Empty;
+        public override string ToString() => Display;
+    }
+
+    private bool _suppressOnbDeviceChange;
+
+    private void PopulateOnbInputDeviceCombo()
+    {
+        var items = new System.Collections.Generic.List<OnbInputDeviceItem>
+        {
+            new() { Id = null, Display = "Default device (follows Windows)" },
+        };
+        try
+        {
+            using var enumerator = new NAudio.CoreAudioApi.MMDeviceEnumerator();
+            var devices = enumerator.EnumerateAudioEndPoints(
+                NAudio.CoreAudioApi.DataFlow.Capture,
+                NAudio.CoreAudioApi.DeviceState.Active);
+            foreach (var d in devices)
+            {
+                items.Add(new OnbInputDeviceItem
+                {
+                    Id = d.ID,
+                    Display = d.FriendlyName ?? "(unknown device)",
+                });
+                d.Dispose();
+            }
+        }
+        catch (COMException ex)
+        {
+#pragma warning disable CA1848, CA1873
+            _logger.LogWarning(ex, "Onboarding mic enumeration failed.");
+#pragma warning restore CA1848, CA1873
+        }
+
+        _suppressOnbDeviceChange = true;
+        try
+        {
+            OnbInputDeviceCombo.ItemsSource = items;
+            string? savedId = _prefs.Current.Audio.InputDeviceId;
+            int selectedIndex = 0;
+            for (int i = 1; i < items.Count; i++)
+            {
+                if (string.Equals(items[i].Id, savedId, System.StringComparison.Ordinal))
+                {
+                    selectedIndex = i;
+                    break;
+                }
+            }
+            OnbInputDeviceCombo.SelectedIndex = selectedIndex;
+            OnbInputDeviceCombo.Text = items[selectedIndex].Display;
+        }
+        finally
+        {
+            _suppressOnbDeviceChange = false;
+        }
+    }
+
+    private async void OnOnbInputDeviceChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_suppressOnbDeviceChange || !_loaded)
+        {
+            return;
+        }
+        if (OnbInputDeviceCombo.SelectedItem is not OnbInputDeviceItem item)
+        {
+            return;
+        }
+        OnbInputDeviceCombo.Text = item.Display;
+
+        var current = _prefs.Current;
+        if (current.Audio.InputDeviceId == item.Id)
+        {
+            return;
+        }
+        var next = current with { Audio = current.Audio with { InputDeviceId = item.Id } };
+#pragma warning disable CA1848, CA1873
+        _logger.LogInformation("Onboarding input device changed → {Id} ({Display}).",
+            item.Id ?? "(default)", item.Display);
+#pragma warning restore CA1848, CA1873
+        try
+        {
+            await _prefs.SaveAsync(next).ConfigureAwait(true);
+            // Re-open the meter on the new device so the user sees the level
+            // jump for the device they actually chose.
+            StopMicCheck();
+            StartMicCheck();
+        }
+        catch (IOException ex)
+        {
+#pragma warning disable CA1848, CA1873
+            _logger.LogWarning(ex, "Onboarding PrefsStore save failed for InputDeviceId.");
+#pragma warning restore CA1848, CA1873
+        }
+    }
+
+    private NAudio.CoreAudioApi.MMDevice ResolveOnbMicDevice(
+        NAudio.CoreAudioApi.MMDeviceEnumerator enumerator,
+        string? preferredId)
+    {
+        if (!string.IsNullOrEmpty(preferredId))
+        {
+            try
+            {
+                var device = enumerator.GetDevice(preferredId);
+                if (device is not null
+                    && device.State == NAudio.CoreAudioApi.DeviceState.Active
+                    && device.DataFlow == NAudio.CoreAudioApi.DataFlow.Capture)
+                {
+                    return device;
+                }
+                device?.Dispose();
+            }
+            catch (COMException ex)
+            {
+#pragma warning disable CA1848, CA1873
+                _logger.LogWarning(ex,
+                    "Onboarding mic: preferred device {Id} not resolvable; using OS default.",
+                    preferredId);
+#pragma warning restore CA1848, CA1873
+            }
+        }
+        return enumerator.GetDefaultAudioEndpoint(
+            NAudio.CoreAudioApi.DataFlow.Capture,
+            NAudio.CoreAudioApi.Role.Communications);
     }
 }

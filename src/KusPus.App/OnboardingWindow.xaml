@@ -218,12 +218,28 @@
                                    FontSize="22" FontWeight="SemiBold"
                                    Foreground="{DynamicResource PrimaryText}"
                                    Margin="0,6,0,8"/>
-                        <TextBlock Text="We need permission to listen while you hold the hotkey. Nothing is recorded otherwise."
+                        <TextBlock Text="We need permission to listen while you hold the hotkey. Nothing is recorded otherwise. Pick which mic to use — you can change it later in Preferences → Audio."
                                    FontFamily="Segoe UI Variable Text, Segoe UI"
                                    FontSize="13"
                                    Foreground="{DynamicResource SecondaryText}"
                                    MaxWidth="540" TextWrapping="Wrap"
-                                   Margin="0,0,0,28"/>
+                                   Margin="0,0,0,20"/>
+
+                        <!-- Input device chooser — writes to PrefsStore.Audio.InputDeviceId,
+                             the same field Preferences → Audio uses. Selection persists
+                             until user changes it from Preferences. The live meter card
+                             below re-binds to whichever device is picked. -->
+                        <StackPanel HorizontalAlignment="Center" Width="440" Margin="0,0,0,16">
+                            <TextBlock Text="INPUT DEVICE"
+                                       FontFamily="Segoe UI Variable Text, Segoe UI"
+                                       FontSize="10.5"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource MutedText}"
+                                       Margin="0,0,0,8"/>
+                            <ComboBox x:Name="OnbInputDeviceCombo"
+                                      Style="{StaticResource ComboBox.Surface}"
+                                      SelectionChanged="OnOnbInputDeviceChanged"/>
+                        </StackPanel>
 
                         <Border x:Name="MicCard"
                                 HorizontalAlignment="Center"
