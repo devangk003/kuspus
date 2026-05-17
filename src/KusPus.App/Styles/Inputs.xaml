@@ -97,6 +97,18 @@
         <Setter Property="HorizontalContentAlignment" Value="Left"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+        <!-- Virtualize the dropdown's items panel — cheap insurance for users
+             with 20+ capture devices, and aligns with the Microsoft-recommended
+             pattern for ComboBox perf. See learn.microsoft.com / dotnet/wpf#9881. -->
+        <Setter Property="ItemsPanel">
+            <Setter.Value>
+                <ItemsPanelTemplate>
+                    <VirtualizingStackPanel/>
+                </ItemsPanelTemplate>
+            </Setter.Value>
+        </Setter>
+        <Setter Property="VirtualizingStackPanel.IsVirtualizing" Value="True"/>
+        <Setter Property="VirtualizingStackPanel.VirtualizationMode" Value="Recycling"/>
         <Setter Property="ItemContainerStyle">
             <Setter.Value>
                 <Style TargetType="ComboBoxItem">
@@ -144,19 +156,18 @@
                                Focusable="False"
                                PopupAnimation="Fade"
                                VerticalOffset="2">
+                            <!-- DropShadowEffect intentionally omitted from this Popup.
+                                 It was the dominant cause of the ~150 ms first-open lag
+                                 users were seeing (Microsoft Learn — "Optimize control
+                                 performance" + dotnet/wpf#9881). A 1 px BorderStrong
+                                 stroke + the existing surface tinting reads as elevation
+                                 without the per-pixel blur pass. -->
                             <Border Background="{DynamicResource Surface}"
                                     BorderBrush="{DynamicResource BorderStrong}"
                                     BorderThickness="1"
                                     CornerRadius="6"
                                     MinWidth="{TemplateBinding ActualWidth}"
                                     MaxHeight="320">
-                                <Border.Effect>
-                                    <DropShadowEffect Color="Black"
-                                                      Direction="270"
-                                                      ShadowDepth="2"
-                                                      BlurRadius="14"
-                                                      Opacity="0.35"/>
-                                </Border.Effect>
                                 <ScrollViewer>
                                     <ItemsPresenter/>
                                 </ScrollViewer>

@@ -811,11 +811,11 @@ public partial class MainWindow : Window
 
     private bool _suppressInputDeviceChanged;
 
-    private void OnInputDeviceDropDownOpened(object sender, EventArgs e)
-    {
-        // Re-enumerate every dropdown open — cheap (~ms) and picks up hot-plug.
-        PopulateInputDeviceCombo();
-    }
+    // No DropDownOpened re-enumeration here on purpose. Calling
+    // MMDeviceEnumerator.EnumerateAudioEndPoints + rebuilding the ItemsSource
+    // on every open added ~150 ms of perceptual lag (Win32 COM + WPF visual
+    // tree teardown). Population now happens ONCE when the Audio tab opens.
+    // Hot-plugged devices show up the next time the user revisits the tab.
 
     private void PopulateInputDeviceCombo()
     {

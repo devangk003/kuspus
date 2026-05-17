@@ -401,8 +401,7 @@
                                       MinWidth="240"
                                       MaxWidth="320"
                                       VerticalAlignment="Center"
-                                      SelectionChanged="OnInputDeviceChanged"
-                                      DropDownOpened="OnInputDeviceDropDownOpened"/>
+                                      SelectionChanged="OnInputDeviceChanged"/>
                         </Grid>
                     </Border>
 
