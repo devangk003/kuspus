@@ -76,10 +76,28 @@ public partial class OnboardingWindow : Window
         PreviewKeyUp += OnPreviewKeyUp;
     }
 
+    // Win11 DWM rounded-corner constants per the dwmapi.h header.
+    // DWMWA_WINDOW_CORNER_PREFERENCE = 33; DWMWCP_ROUND = 2 (~8 px radius).
+    // On Win10 the attribute is silently ignored — the Background={AppBg} fix in
+    // OnboardingWindow.xaml ensures the corners blend on that fallback path.
+    // Reference: https://learn.microsoft.com/windows/win32/api/dwmapi/ne-dwmapi-dwm_window_corner_preference
+    private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    private const int DWMWCP_ROUND = 2;
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
+
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         var hwnd = new WindowInteropHelper(this).Handle;
         ThemeApply.ApplyToWindow(hwnd, ThemeApply.Resolve(_prefs.Current.Ui.Theme));
+
+        // Round the OS-level window edge so it matches the inner Border's
+        // Radius.Lg (8 px). Without this the WindowStyle=None +
+        // AllowsTransparency=False window is a hard rectangle and the rounded
+        // <Border> renders against black/AppBg-coloured cutouts at each corner.
+        int corner = DWMWCP_ROUND;
+        _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)

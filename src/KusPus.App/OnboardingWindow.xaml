@@ -9,7 +9,7 @@
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
         AllowsTransparency="False"
-        Background="Transparent"
+        Background="{DynamicResource AppBg}"
         ShowInTaskbar="False"
         UseLayoutRounding="True"
         SnapsToDevicePixels="True"
@@ -20,7 +20,15 @@
         appears centered and topmost, which is enough until the §4.1 dimmed-desktop
         polish in a later cluster.
     -->
-    <Border x:Name="Root" CornerRadius="12"
+    <!-- Corner radius pulled from design-system token Radius.Lg (= 8) so it
+         matches the OS-rounded outer window edge produced by DwmSetWindowAttribute
+         in OnSourceInitialized. The Win11 DWM API only supports two values for
+         DWMWA_WINDOW_CORNER_PREFERENCE — DWMWCP_ROUND (~8 px) or
+         DWMWCP_ROUNDSMALL (~4 px) — so the spec's original 12 px would create
+         a visible mismatch between the inner Border curve and the OS-clipped
+         window edge. 8 px is the aligned choice. -->
+    <Border x:Name="Root"
+            CornerRadius="{StaticResource Radius.Lg}"
             Background="{DynamicResource AppBg}"
             BorderBrush="{DynamicResource BorderSubtle}"
             BorderThickness="1">

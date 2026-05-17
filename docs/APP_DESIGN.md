@@ -826,7 +826,7 @@ Shown on first launch. Modal \*\*over a dimmed desktop\*\* (not a tab inside the
 
 | Background | App background (`#202020` dark / `#F3F3F3` light) |
 
-| Corner radius | 12 px |
+| Corner radius | **8 px** (Radius.Lg token — see §13.7 for the 12→8 deviation rationale) |
 
 | Shadow | `0 40 80 rgba(0,0,0,0.55)` (dark) / `0 40 80 rgba(0,0,0,0.20)` (light) + 1 px hairline border |
 
@@ -1713,6 +1713,60 @@ Reads as a single composed "history widget" instead of four separately-styled bl
 
 
 `Btn.Primary`, `Btn.Sm`, `Btn.Lg` have zero call sites but are **deliberately retained** as design-system vocabulary. The Buttons.xaml header now documents which kinds have callers and which are reserved roles, so the dead-code scanner can distinguish "forgotten" from "reserved."
+
+
+
+\---
+
+
+
+\## 13.7 OnboardingWindow rounded corners — DWM + token alignment
+
+
+
+\*\*Bug.\*\* OnboardingWindow was declared `WindowStyle="None" AllowsTransparency="False" Background="Transparent"`. Per the WPF spec, `AllowsTransparency` and `Background="Transparent"` must be paired — without `AllowsTransparency="True"` the window's backbuffer is opaque and the "transparent" colour renders as \*\*black\*\* outside the inner `<Border CornerRadius="12">` path. Result: 4 black corner cutouts behind the rounded card.
+
+
+
+\*\*Fix.\*\* Two changes per Microsoft's [Apply rounded corners in desktop apps for Windows 11](https://learn.microsoft.com/windows/apps/desktop/modernize/ui/apply-rounded-corners) guidance:
+
+
+
+1\. \*\*XAML: `Background="Transparent"` → `Background="{DynamicResource AppBg}"`\*\* — corners blend on every Windows version including Win10 fallback.
+
+2\. \*\*Code-behind: `DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_ROUND = 2, sizeof(int))` in `OnSourceInitialized`\*\* — Win11 rounds the OS-level window edge. Win10 silently ignores the attribute; the Background fix carries it.
+
+
+
+\*\*Corner radius deviation.\*\* APP\_DESIGN.md §4.1 originally specified \*\*12 px\*\*. The Win11 DWM API only supports two values for the corner-preference attribute:
+
+
+
+- `DWMWCP_ROUND` (= 2) — \*\*~8 px\*\* radius (standard for top-level windows)
+
+- `DWMWCP_ROUNDSMALL` (= 3) — \*\*~4 px\*\* radius (for small UI like tooltips)
+
+
+
+There is no API path to a custom 12 px radius without dropping into `AllowsTransparency="True"` (loses Mica/Acrylic compatibility, perf hit, the corner-cutout problem returns under our control). The pragmatic call: \*\*use the DWM `ROUND` (~8 px) and align the inner `<Border>` to the same value via the design-system token `Radius.Lg` (= 8)\*\*. This is also the radius MainWindow uses, so the two windows now share one canonical corner curvature. The 12 px reference in §4.1 was updated to `Radius.Lg` with a back-reference to this section.
+
+
+
+\*\*Behaviour summary.\*\*
+
+
+
+| Windows version | What you see |
+
+|---|---|
+
+| Win11 | OS-rounded outer window edge + matching `Radius.Lg` inner Border = single 8 px curve, no cutouts. |
+
+| Win10 | Outer window edge is square (DWM API is a no-op); inner Border has 8 px corners. The "corner triangles" outside the Border are filled with `AppBg` instead of black → visually invisible. |
+
+
+
+The 12 → 8 deviation is recorded here rather than in `CLAUDE.md` because it's a spec revision, not a code-side deviation.
 
 
 
