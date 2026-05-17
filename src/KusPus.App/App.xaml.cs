@@ -131,6 +131,11 @@ public partial class App : System.Windows.Application
             prefs: new PrefsStoreBridge(prefsStore),
             audio: new AudioDeviceBridge());
 
+        // Personality animations gate: user opt-out OR Windows accessibility
+        // "Show animations" setting off. Recomputed on every settings change.
+        UpdatePillReduceAnimations(prefsStore.Current);
+        prefsStore.Changes.Subscribe(s => Dispatcher.BeginInvoke(() => UpdatePillReduceAnimations(s)));
+
         _tray = new TrayManager(
             _coordinator,
             onPreferences: () => _mainWindow.ShowOn("general"),
@@ -229,6 +234,15 @@ public partial class App : System.Windows.Application
             sp.GetRequiredService<IPrefsStore>(),
             WpfApplication.Current.Dispatcher,
             sp.GetService<ILogger<AppCoordinator>>()));
+    }
+
+    private void UpdatePillReduceAnimations(KusPus.Core.Settings.AppSettings s)
+    {
+        // Combine the user toggle with Windows' "Show animations" accessibility
+        // setting — if either says "reduce", we reduce. SystemParameters.ClientAreaAnimation
+        // is true when Windows wants animations enabled.
+        bool reduce = s.Privacy.ReducePillAnimations || !SystemParameters.ClientAreaAnimation;
+        _pill?.SetReduceAnimations(reduce);
     }
 
     // ── Pill bridges ───────────────────────────────────────────────────────

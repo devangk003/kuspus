@@ -249,6 +249,109 @@ public partial class FloatingPillWindow : Window
         // between dictations. Transition into Idle so the position math runs
         // and the surface appears.
         TransitionTo(PillVisual.Idle);
+        // Personality animations default ON; SetReduceAnimations from the
+        // composition root will pause them if user toggle or OS reduced-motion
+        // says so.
+        StartPersonalityAnimations();
+    }
+
+    // ── Personality animations (PILL_DESIGN Phase 3) ─────────────────────
+    //
+    // Breath: subtle ±0.6% scale pulse on a 4 s sine. ScaleTransform on
+    // PillSurface (RenderTransformOrigin=0.5,0.5).
+    // Hue drift: AccentBrush's middle gradient stop cycles mint → seafoam →
+    // cyan → back over 14 s with constant perceived lightness (manual color
+    // picks approximate OKLCH L=0.84, C=0.14 constraint — WPF has no native
+    // OKLCH interpolation).
+    //
+    // Both stored as long-lived Storyboards so SetReduceAnimations can pause
+    // them on toggle without rebuilding.
+
+    private void StartPersonalityAnimations()
+    {
+        if (_personalityRunning || _reduceAnimations || _bars[0] is null)
+        {
+            return;
+        }
+        BuildBreathStoryboard();
+        BuildHueDriftStoryboard();
+        _breathStoryboard?.Begin(this, isControllable: true);
+        _hueStoryboard?.Begin(this, isControllable: true);
+        _personalityRunning = true;
+    }
+
+    private void StopPersonalityAnimations()
+    {
+        if (!_personalityRunning)
+        {
+            return;
+        }
+        // Storyboard.Stop returns BreathScale/AccentBrush to their initial values
+        // (ScaleX/Y=1.0, mint #4DDBA6) so the pill stops at a clean rest pose.
+        _breathStoryboard?.Stop(this);
+        _hueStoryboard?.Stop(this);
+        _personalityRunning = false;
+    }
+
+    private void BuildBreathStoryboard()
+    {
+        if (_breathStoryboard is not null)
+        {
+            return;
+        }
+        var sb = new Storyboard();
+        // 2 s in + 2 s out via AutoReverse = 4 s cycle. SineEase for the
+        // "alive breath" feel.
+        var scaleAnim = new DoubleAnimation
+        {
+            From = 1.0,
+            To = 1.006,
+            Duration = new Duration(TimeSpan.FromSeconds(2)),
+            AutoReverse = true,
+            RepeatBehavior = RepeatBehavior.Forever,
+            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
+        };
+        Storyboard.SetTarget(scaleAnim, BreathScale);
+        // Two clones — one per axis — so storyboard owns both.
+        var xAnim = scaleAnim.Clone();
+        var yAnim = scaleAnim.Clone();
+        Storyboard.SetTargetProperty(xAnim, new PropertyPath(ScaleTransform.ScaleXProperty));
+        Storyboard.SetTargetProperty(yAnim, new PropertyPath(ScaleTransform.ScaleYProperty));
+        Storyboard.SetTarget(xAnim, BreathScale);
+        Storyboard.SetTarget(yAnim, BreathScale);
+        sb.Children.Add(xAnim);
+        sb.Children.Add(yAnim);
+        _breathStoryboard = sb;
+    }
+
+    private void BuildHueDriftStoryboard()
+    {
+        if (_hueStoryboard is not null)
+        {
+            return;
+        }
+        var hueAnim = new ColorAnimationUsingKeyFrames
+        {
+            Duration = new Duration(TimeSpan.FromSeconds(14)),
+            RepeatBehavior = RepeatBehavior.Forever,
+        };
+        // Constant-R=0x4D so the hue shift stays in the same brightness band
+        // (manual approximation of OKLCH constant-L/C constraint). Alpha=0x80
+        // matches the middle gradient stop's resting opacity.
+        hueAnim.KeyFrames.Add(new LinearColorKeyFrame(
+            WpfColor.FromArgb(0x80, 0x4D, 0xDB, 0xA6), KeyTime.FromPercent(0.0)));
+        hueAnim.KeyFrames.Add(new LinearColorKeyFrame(
+            WpfColor.FromArgb(0x80, 0x4D, 0xCD, 0xC2), KeyTime.FromPercent(0.33)));
+        hueAnim.KeyFrames.Add(new LinearColorKeyFrame(
+            WpfColor.FromArgb(0x80, 0x4D, 0xB8, 0xDB), KeyTime.FromPercent(0.66)));
+        hueAnim.KeyFrames.Add(new LinearColorKeyFrame(
+            WpfColor.FromArgb(0x80, 0x4D, 0xDB, 0xA6), KeyTime.FromPercent(1.0)));
+
+        var sb = new Storyboard();
+        sb.Children.Add(hueAnim);
+        Storyboard.SetTarget(hueAnim, AccentBrush.GradientStops[1]);
+        Storyboard.SetTargetProperty(hueAnim, new PropertyPath(GradientStop.ColorProperty));
+        _hueStoryboard = sb;
     }
 
     // ── Visualizer build ────────────────────────────────────────────────────
@@ -871,6 +974,11 @@ public partial class FloatingPillWindow : Window
     private bool _isPinned;
     private IPrefsStoreBridge? _prefsBridge;
     private IAudioRecorderBridge? _audioBridge;
+    // Phase 3 — personality animations.
+    private Storyboard? _breathStoryboard;
+    private Storyboard? _hueStoryboard;
+    private bool _reduceAnimations;
+    private bool _personalityRunning;
 
     // Composition root injects these tiny bridges so the pill can read the
     // current device list + active selection without taking a hard dependency
@@ -890,6 +998,24 @@ public partial class FloatingPillWindow : Window
         _prefsBridge = prefs;
         _audioBridge = audio;
         UpdateMicChooserLabel();
+    }
+
+    /// <summary>
+    /// Composition root calls this with (userToggle OR Windows reduced-motion).
+    /// True → personality animations (breath, hue drift) pause. State-transition
+    /// animations and the dock slide remain active.
+    /// </summary>
+    public void SetReduceAnimations(bool reduce)
+    {
+        _reduceAnimations = reduce;
+        if (reduce)
+        {
+            StopPersonalityAnimations();
+        }
+        else
+        {
+            StartPersonalityAnimations();
+        }
     }
 
     private void OnPillMouseEnter(object sender, System.Windows.Input.MouseEventArgs e)

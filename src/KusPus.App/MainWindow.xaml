@@ -689,6 +689,32 @@
                         </Grid>
                     </Border>
 
+                    <!-- Accessibility — Reduce-animation toggle gates the pill's
+                         personality cues (breath / halo / hue drift / heartbeat
+                         blink). Effective if EITHER this is on OR Windows'
+                         "Show animations" accessibility setting is off. -->
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Accessibility"/>
+                    <Border Style="{StaticResource RowCard}" Margin="0,0,0,28">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Reduce pill animations"
+                                           Style="{StaticResource Type.RowTitle}"/>
+                                <TextBlock Text="Disables the breath, hue drift, and heartbeat-blink cues on the floating pill. State transitions and the dock slide remain active."
+                                           Style="{StaticResource Type.RowSubtitle}"/>
+                            </StackPanel>
+                            <CheckBox x:Name="ReducePillAnimationsToggle"
+                                      Grid.Column="1"
+                                      Style="{StaticResource Toggle}"
+                                      VerticalAlignment="Center"
+                                      Checked="OnReducePillAnimationsChanged"
+                                      Unchecked="OnReducePillAnimationsChanged"/>
+                        </Grid>
+                    </Border>
+
                     <TextBlock Style="{StaticResource SectionHeader}" Text="Logs"/>
                     <Border Style="{StaticResource RowCard}" Margin="0,0,0,28">
                         <StackPanel>

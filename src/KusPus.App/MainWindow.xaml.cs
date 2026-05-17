@@ -171,6 +171,7 @@ public partial class MainWindow : Window
         // Privacy tab initial state (9H + 13.1).
         OfflineToggle.IsChecked = s.Privacy.OfflineMode;
         CrashReportsToggle.IsChecked = s.Privacy.CrashReportsOptIn;
+        ReducePillAnimationsToggle.IsChecked = s.Privacy.ReducePillAnimations;
         UpdateOfflineSubtitle(s.Privacy.OfflineMode);
         ApplyCrashReportsGating(s.Privacy.OfflineMode);
         LogsPath.Text = AppPaths.LogsDir;
@@ -2128,6 +2129,34 @@ public partial class MainWindow : Window
         {
 #pragma warning disable CA1848, CA1873
             _logger.LogWarning(ex, "PrefsStore.SaveAsync failed for OfflineMode.");
+#pragma warning restore CA1848, CA1873
+        }
+    }
+
+    private async void OnReducePillAnimationsChanged(object sender, RoutedEventArgs e)
+    {
+        if (!_loaded)
+        {
+            return;
+        }
+        bool enabled = ReducePillAnimationsToggle.IsChecked == true;
+        var current = _prefs.Current;
+        if (current.Privacy.ReducePillAnimations == enabled)
+        {
+            return;
+        }
+        var next = current with { Privacy = current.Privacy with { ReducePillAnimations = enabled } };
+#pragma warning disable CA1848, CA1873
+        _logger.LogInformation("Reduce pill animations → {Value}.", enabled);
+#pragma warning restore CA1848, CA1873
+        try
+        {
+            await _prefs.SaveAsync(next).ConfigureAwait(true);
+        }
+        catch (System.IO.IOException ex)
+        {
+#pragma warning disable CA1848, CA1873
+            _logger.LogWarning(ex, "PrefsStore.SaveAsync failed for ReducePillAnimations.");
 #pragma warning restore CA1848, CA1873
         }
     }

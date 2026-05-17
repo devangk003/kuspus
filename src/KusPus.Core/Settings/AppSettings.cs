@@ -61,6 +61,14 @@ public sealed record PrivacySettings
 {
     public bool OfflineMode { get; init; }
     public bool CrashReportsOptIn { get; init; }
+    /// <summary>
+    /// Accessibility opt-in: when true, the pill's personality animations
+    /// (breath, halo, hue drift, heartbeat blink) are disabled. The pill's
+    /// state crossfades + dock slide remain active — only the always-on
+    /// "alive" cues are gated. Effective if EITHER this is true OR the
+    /// Windows "Show animations" accessibility setting is off.
+    /// </summary>
+    public bool ReducePillAnimations { get; init; }
 }
 
 public sealed record OnboardingSettings

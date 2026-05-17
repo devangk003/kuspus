@@ -51,7 +51,11 @@
                 Background="{DynamicResource PillSurface}"
                 BorderBrush="{DynamicResource PillBorder}"
                 BorderThickness="1"
-                MouseLeftButtonDown="OnPillMouseLeftButtonDown">
+                MouseLeftButtonDown="OnPillMouseLeftButtonDown"
+                RenderTransformOrigin="0.5,0.5">
+            <Border.RenderTransform>
+                <ScaleTransform x:Name="BreathScale" ScaleX="1" ScaleY="1"/>
+            </Border.RenderTransform>
             <Border.Effect>
                 <!-- Kept black drop-shadow in both themes; barely visible behind
                      a light pill anyway. -->
