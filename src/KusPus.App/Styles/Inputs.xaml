@@ -40,4 +40,132 @@
         <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
     </Style>
 
+    <!--
+        ComboBox.Surface — design-system-aligned dropdown that matches the
+        SegmentButton wrapper aesthetic (SurfaceInput bg + BorderStrong border
+        + 7 px corner radius). Used for the Audio-tab Microphone picker.
+
+        Most of the heavy lifting is the ToggleButton chrome (the closed-state
+        appearance) and the Popup template — both fully restyled so WPF's
+        default Aero/MD chrome doesn't leak through.
+    -->
+
+    <SolidColorBrush x:Key="ComboBox.Hover" Color="#1AFFFFFF"/>
+
+    <ControlTemplate x:Key="ComboBox.Surface.ToggleTemplate" TargetType="ToggleButton">
+        <Border x:Name="bg"
+                Background="{DynamicResource SurfaceInput}"
+                BorderBrush="{DynamicResource BorderStrong}"
+                BorderThickness="1"
+                CornerRadius="6"
+                Padding="10,7"
+                SnapsToDevicePixels="True">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <ContentPresenter Grid.Column="0"
+                                  HorizontalAlignment="Left"
+                                  VerticalAlignment="Center"
+                                  TextElement.Foreground="{DynamicResource PrimaryText}"
+                                  TextElement.FontFamily="Segoe UI Variable Text, Segoe UI"
+                                  TextElement.FontSize="12.5"
+                                  TextElement.FontWeight="Medium"
+                                  Content="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=Tag}"/>
+                <TextBlock Grid.Column="1"
+                           Text="&#xE70D;"
+                           FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                           FontSize="10"
+                           Foreground="{DynamicResource MutedText}"
+                           VerticalAlignment="Center"
+                           Margin="10,0,0,0"/>
+            </Grid>
+        </Border>
+        <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="bg" Property="Background" Value="{StaticResource ComboBox.Hover}"/>
+            </Trigger>
+            <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="bg" Property="BorderBrush" Value="{DynamicResource Mint}"/>
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
+    <Style x:Key="ComboBox.Surface" TargetType="ComboBox">
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource Focus.Mint}"/>
+        <Setter Property="HorizontalContentAlignment" Value="Left"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+        <Setter Property="ItemContainerStyle">
+            <Setter.Value>
+                <Style TargetType="ComboBoxItem">
+                    <Setter Property="Padding" Value="10,7"/>
+                    <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI"/>
+                    <Setter Property="FontSize" Value="12.5"/>
+                    <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="ComboBoxItem">
+                                <Border x:Name="itemBg"
+                                        Background="Transparent"
+                                        Padding="{TemplateBinding Padding}"
+                                        CornerRadius="4"
+                                        Margin="2">
+                                    <ContentPresenter VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsHighlighted" Value="True">
+                                        <Setter TargetName="itemBg" Property="Background" Value="{DynamicResource HoverSubtle}"/>
+                                    </Trigger>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter TargetName="itemBg" Property="Background" Value="{DynamicResource MintTint}"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </Setter.Value>
+        </Setter>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ComboBox">
+                    <Grid>
+                        <ToggleButton x:Name="toggle"
+                                      Template="{StaticResource ComboBox.Surface.ToggleTemplate}"
+                                      IsChecked="{Binding Path=IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                      Focusable="False"
+                                      ClickMode="Press"
+                                      Tag="{TemplateBinding ComboBox.Text}"/>
+                        <Popup Placement="Bottom"
+                               IsOpen="{TemplateBinding IsDropDownOpen}"
+                               AllowsTransparency="True"
+                               Focusable="False"
+                               PopupAnimation="Fade"
+                               VerticalOffset="2">
+                            <Border Background="{DynamicResource Surface}"
+                                    BorderBrush="{DynamicResource BorderStrong}"
+                                    BorderThickness="1"
+                                    CornerRadius="6"
+                                    MinWidth="{TemplateBinding ActualWidth}"
+                                    MaxHeight="320">
+                                <Border.Effect>
+                                    <DropShadowEffect Color="Black"
+                                                      Direction="270"
+                                                      ShadowDepth="2"
+                                                      BlurRadius="14"
+                                                      Opacity="0.35"/>
+                                </Border.Effect>
+                                <ScrollViewer>
+                                    <ItemsPresenter/>
+                                </ScrollViewer>
+                            </Border>
+                        </Popup>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
 </ResourceDictionary>

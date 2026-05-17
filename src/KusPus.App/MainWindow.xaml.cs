@@ -351,6 +351,10 @@ public partial class MainWindow : Window
         // Cluster 9E: live-level polling only runs while Audio tab is showing.
         if (key == "audio")
         {
+            // Repopulate the device combo + match the persisted selection
+            // before opening the meter — so the meter uses the right device
+            // and the closed-state ComboBox text is correct on first open.
+            PopulateInputDeviceCombo();
             StartAudioMeter();
         }
         else
@@ -787,12 +791,167 @@ public partial class MainWindow : Window
         return null;
     }
 
+    // ── Audio-tab input-device picker ─────────────────────────────────────
+    // Per UI UX Pro Max input-helper-text + state-clarity rules: the ComboBox
+    // shows the currently-selected mic at a glance (closed state) and exposes
+    // every active capture device + a "Default device" entry on open.
+    //
+    // Population strategy: lazy — enumerate on DropDownOpened (so freshly
+    // plugged USB mics appear without restarting the app) AND once when the
+    // Audio tab first becomes visible (so the closed-state Text is correct
+    // before the user opens the dropdown). Selection writes to settings.
+
+    private sealed class InputDeviceItem
+    {
+        // null Id == "default device" sentinel (matches Audio.InputDeviceId nullability).
+        public string? Id { get; init; }
+        public string Display { get; init; } = string.Empty;
+        public override string ToString() => Display;
+    }
+
+    private bool _suppressInputDeviceChanged;
+
+    private void OnInputDeviceDropDownOpened(object sender, EventArgs e)
+    {
+        // Re-enumerate every dropdown open — cheap (~ms) and picks up hot-plug.
+        PopulateInputDeviceCombo();
+    }
+
+    private void PopulateInputDeviceCombo()
+    {
+        var items = new List<InputDeviceItem>
+        {
+            new() { Id = null, Display = "Default device (follows Windows)" },
+        };
+        try
+        {
+            using var enumerator = new NAudio.CoreAudioApi.MMDeviceEnumerator();
+            var devices = enumerator.EnumerateAudioEndPoints(
+                NAudio.CoreAudioApi.DataFlow.Capture,
+                NAudio.CoreAudioApi.DeviceState.Active);
+            foreach (var d in devices)
+            {
+                items.Add(new InputDeviceItem
+                {
+                    Id = d.ID,
+                    Display = d.FriendlyName ?? "(unknown device)",
+                });
+                d.Dispose();
+            }
+        }
+        catch (System.Runtime.InteropServices.COMException ex)
+        {
+#pragma warning disable CA1848, CA1873
+            _logger.LogWarning(ex, "EnumerateAudioEndpoints failed.");
+#pragma warning restore CA1848, CA1873
+        }
+
+        _suppressInputDeviceChanged = true;
+        try
+        {
+            InputDeviceCombo.ItemsSource = items;
+            // Match the persisted preference; fall back to "Default" if the
+            // saved device id isn't in the current device list (unplugged etc.).
+            string? savedId = _prefs.Current.Audio.InputDeviceId;
+            int selectedIndex = 0;
+            for (int i = 1; i < items.Count; i++)
+            {
+                if (string.Equals(items[i].Id, savedId, StringComparison.Ordinal))
+                {
+                    selectedIndex = i;
+                    break;
+                }
+            }
+            InputDeviceCombo.SelectedIndex = selectedIndex;
+            // Closed-state text — bound to Tag via the template, kept in sync here.
+            InputDeviceCombo.Text = items[selectedIndex].Display;
+        }
+        finally
+        {
+            _suppressInputDeviceChanged = false;
+        }
+    }
+
+    private async void OnInputDeviceChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_suppressInputDeviceChanged || !_loaded)
+        {
+            return;
+        }
+        if (InputDeviceCombo.SelectedItem is not InputDeviceItem item)
+        {
+            return;
+        }
+        InputDeviceCombo.Text = item.Display;
+
+        var current = _prefs.Current;
+        if (current.Audio.InputDeviceId == item.Id)
+        {
+            return;
+        }
+        var next = current with { Audio = current.Audio with { InputDeviceId = item.Id } };
+#pragma warning disable CA1848, CA1873
+        _logger.LogInformation("Input device changed → {Id} ({Display}).", item.Id ?? "(default)", item.Display);
+#pragma warning restore CA1848, CA1873
+        try
+        {
+            await _prefs.SaveAsync(next).ConfigureAwait(true);
+            // If the level meter is currently running, restart it so the new
+            // device takes effect immediately for the live preview.
+            if (_audioMeterCapture is not null)
+            {
+                StopAudioMeter();
+                StartAudioMeter();
+            }
+        }
+        catch (System.IO.IOException ex)
+        {
+#pragma warning disable CA1848, CA1873
+            _logger.LogWarning(ex, "PrefsStore.SaveAsync failed for InputDeviceId.");
+#pragma warning restore CA1848, CA1873
+        }
+    }
+
     // ── Audio-tab level meter (9E) ──────────────────────────────────────────
     //
     // Uses NAudio's MMDevice.AudioMeterInformation, which reports the device's
     // hardware peak without opening a capture session. Polling at ~15 Hz on a
     // DispatcherTimer mirrors the pill visualizer rate without the per-channel
     // RMS pipeline. Bars are seeded on first activation.
+
+    // Mirrors AudioRecorder.ResolveCaptureDevice — the level meter and the
+    // dictation recorder both should use the same user-picked device.
+    // Falls back to OS default if the saved preference is no longer present.
+    private NAudio.CoreAudioApi.MMDevice ResolveLevelMeterDevice(
+        NAudio.CoreAudioApi.MMDeviceEnumerator enumerator,
+        string? preferredId)
+    {
+        if (!string.IsNullOrEmpty(preferredId))
+        {
+            try
+            {
+                var device = enumerator.GetDevice(preferredId);
+                if (device is not null
+                    && device.State == NAudio.CoreAudioApi.DeviceState.Active
+                    && device.DataFlow == NAudio.CoreAudioApi.DataFlow.Capture)
+                {
+                    return device;
+                }
+                device?.Dispose();
+            }
+            catch (COMException ex)
+            {
+#pragma warning disable CA1848, CA1873
+                _logger.LogWarning(ex,
+                    "Level meter: preferred device {Id} not resolvable; using OS default.",
+                    preferredId);
+#pragma warning restore CA1848, CA1873
+            }
+        }
+        return enumerator.GetDefaultAudioEndpoint(
+            NAudio.CoreAudioApi.DataFlow.Capture,
+            NAudio.CoreAudioApi.Role.Communications);
+    }
 
     private void StartAudioMeter()
     {
@@ -801,10 +960,7 @@ public partial class MainWindow : Window
             try
             {
                 _mmEnumerator ??= new NAudio.CoreAudioApi.MMDeviceEnumerator();
-                var device = _mmEnumerator.GetDefaultAudioEndpoint(
-                    NAudio.CoreAudioApi.DataFlow.Capture,
-                    NAudio.CoreAudioApi.Role.Communications);
-                AudioDeviceTitle.Text = device.FriendlyName ?? "Microphone";
+                var device = ResolveLevelMeterDevice(_mmEnumerator, _prefs.Current.Audio.InputDeviceId);
 
                 var capture = new NAudio.CoreAudioApi.WasapiCapture(device);
                 _meterCaptureIsFloat = capture.WaveFormat.Encoding ==
@@ -819,7 +975,7 @@ public partial class MainWindow : Window
 #pragma warning disable CA1848, CA1873
                 _logger.LogWarning(ex, "Audio meter setup failed — no capture device?");
 #pragma warning restore CA1848, CA1873
-                AudioDeviceTitle.Text = "No microphone detected";
+                AudioDeviceSubtitle.Text = "No microphone detected — plug one in or pick another in the dropdown.";
                 return;
             }
             catch (NAudio.MmException ex)
@@ -827,7 +983,7 @@ public partial class MainWindow : Window
 #pragma warning disable CA1848, CA1873
                 _logger.LogWarning(ex, "WasapiCapture init failed — privacy block / busy device?");
 #pragma warning restore CA1848, CA1873
-                AudioDeviceTitle.Text = "Microphone busy or blocked";
+                AudioDeviceSubtitle.Text = "Microphone busy or blocked — check Windows Privacy → Microphone.";
                 return;
             }
         }

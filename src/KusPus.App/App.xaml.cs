@@ -115,6 +115,14 @@ public partial class App : System.Windows.Application
         // up). Wired here, not above, because _mainWindow has to exist first.
         _pill.SetSettingsAction(() => _mainWindow.ShowOn("general"));
 
+        // Push the user's preferred input device id into the AudioRecorder on
+        // startup AND on every settings change. Composition-root owns this
+        // because AudioRecorder doesn't take a Persistence dependency.
+        var prefsStore = _services.GetRequiredService<IPrefsStore>();
+        var audioRecorder = _services.GetRequiredService<IAudioRecorder>();
+        audioRecorder.SetInputDeviceId(prefsStore.Current.Audio.InputDeviceId);
+        prefsStore.Changes.Subscribe(s => audioRecorder.SetInputDeviceId(s.Audio.InputDeviceId));
+
         _tray = new TrayManager(
             _coordinator,
             onPreferences: () => _mainWindow.ShowOn("general"),

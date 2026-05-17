@@ -383,13 +383,27 @@
                 <StackPanel x:Name="ContentAudio" Visibility="Collapsed">
                     <TextBlock Style="{StaticResource SectionHeader}" Text="Input device"/>
                     <Border Style="{StaticResource RowCard}" Margin="0,0,0,28">
-                        <StackPanel>
-                            <TextBlock x:Name="AudioDeviceTitle"
-                                       Text="—"
-                                       Style="{StaticResource Type.RowTitle}"/>
-                            <TextBlock Text="Default capture device. Follows your Windows microphone selection."
-                                       Style="{StaticResource Type.RowSubtitle}"/>
-                        </StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="Microphone"
+                                           Style="{StaticResource Type.RowTitle}"/>
+                                <TextBlock x:Name="AudioDeviceSubtitle"
+                                           Text="KusPus uses this microphone for dictation."
+                                           Style="{StaticResource Type.RowSubtitle}"/>
+                            </StackPanel>
+                            <ComboBox Grid.Column="1"
+                                      x:Name="InputDeviceCombo"
+                                      Style="{StaticResource ComboBox.Surface}"
+                                      MinWidth="240"
+                                      MaxWidth="320"
+                                      VerticalAlignment="Center"
+                                      SelectionChanged="OnInputDeviceChanged"
+                                      DropDownOpened="OnInputDeviceDropDownOpened"/>
+                        </Grid>
                     </Border>
 
                     <TextBlock Style="{StaticResource SectionHeader}" Text="Live level"/>
