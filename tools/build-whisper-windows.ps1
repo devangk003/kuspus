@@ -98,11 +98,17 @@ if (Test-Path $payload) {
 New-Item -ItemType Directory -Force -Path $payload | Out-Null
 
 # ── 6. Locate the CLI binary ──────────────────────────────────────────────
-# v1.7+ ships `whisper-cli.exe`; older releases used `main.exe`. Accept
-# either so the script works across the v1.6..v1.8+ range.
-$cli = Get-ChildItem -Path $extractDir -Recurse -File |
-    Where-Object { $_.Name -in @('whisper-cli.exe', 'main.exe') } |
-    Select-Object -First 1
+# v1.7+ ships `whisper-cli.exe` as the real CLI. v1.8.x ALSO keeps
+# `main.exe` around but it's a deprecation stub that prints
+# "The binary 'whisper.exe' is deprecated" and exits 1. So always prefer
+# `whisper-cli.exe` over `main.exe`. Pre-v1.7 releases only had `main.exe`
+# — fall back to it only when whisper-cli.exe is genuinely missing.
+$allCli = Get-ChildItem -Path $extractDir -Recurse -File |
+    Where-Object { $_.Name -in @('whisper-cli.exe', 'main.exe') }
+$cli = $allCli | Where-Object { $_.Name -eq 'whisper-cli.exe' } | Select-Object -First 1
+if (-not $cli) {
+    $cli = $allCli | Where-Object { $_.Name -eq 'main.exe' } | Select-Object -First 1
+}
 if (-not $cli) {
     throw "Couldn't find whisper-cli.exe or main.exe in $extractDir. Did the artifact layout change for $Tag?"
 }
@@ -139,21 +145,31 @@ $lines | ForEach-Object { Write-Host "    $_" }
 # ── 10. Smoke test ────────────────────────────────────────────────────────
 Write-Step "Smoke testing whisper.exe -h"
 $exe = Join-Path $payload 'whisper.exe'
+# Use Start-Process (not `& $exe`) so this works in BOTH PowerShell 5.1
+# (Windows PowerShell) AND PowerShell 7 (pwsh). PS 5.1 wraps native-command
+# stderr as ErrorRecords which trip $ErrorActionPreference='Stop' even when
+# the exe exits 0 — Start-Process bypasses that wrapping by going through
+# Process.Start directly.
 # Accept exit codes 0 OR 1:
-#   - 0: newer whisper-cli (v1.7+) returns success for -h
-#   - 1: legacy main.exe (≤v1.6) returns failure for "unknown argument" with
-#        usage to stderr — but the binary loaded its DLLs and ran its arg
-#        parser, which is what we're verifying here.
+#   - 0: whisper-cli (v1.7+) success for -h
+#   - 1: legacy main.exe (≤v1.6) or deprecation-stub responds 1 with usage
+#        to stderr, but it loaded its DLLs and ran arg parser successfully
 # Hard DLL-load crashes show up as large negative exit codes (e.g.
 # -1073741515 STATUS_DLL_NOT_FOUND), which we DO want to fail on.
-& $exe -h 2>$null | Out-Null
-$smokeExit = $LASTEXITCODE
+$smokeStdout = New-TemporaryFile
+$smokeStderr = New-TemporaryFile
+try {
+    $proc = Start-Process -FilePath $exe -ArgumentList '-h' -Wait -PassThru -NoNewWindow `
+        -RedirectStandardOutput $smokeStdout.FullName `
+        -RedirectStandardError $smokeStderr.FullName
+    $smokeExit = $proc.ExitCode
+}
+finally {
+    Remove-Item $smokeStdout.FullName, $smokeStderr.FullName -ErrorAction SilentlyContinue
+}
 if ($smokeExit -notin @(0, 1)) {
     throw "Smoke test failed: '$exe -h' exited with code $smokeExit (expected 0 or 1; large negatives mean missing DLL)."
 }
-# Reset so the script itself exits 0 even when the smoke check used a binary
-# that returned 1 for -h. Without this, PowerShell propagates the last
-# native exit code as the script's own exit code, breaking CI gating.
 $global:LASTEXITCODE = 0
 
 Write-Host ""
