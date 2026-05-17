@@ -1114,6 +1114,15 @@ public partial class FloatingPillWindow : Window
 
     private void OpenDock()
     {
+        // Snap pill's bottom corners to square so the pill+dock seam reads as
+        // one continuous shape. Top corners stay 8 px rounded (Radius.Lg).
+        // Snap (not animate) since CornerRadius isn't a natively animatable
+        // WPF DependencyProperty without a custom animation; the snap happens
+        // BEFORE the dock slide-in so the bottom edge is flat the whole time
+        // the dock is becoming visible. Per pill UI request 2026-05-17.
+        // OnPillMouseEnter / OnPinClick are the only callers; both already
+        // gate on !_isPinned so pinned-mode CornerRadius is never touched.
+        PillSurface.CornerRadius = new CornerRadius(8, 8, 0, 0);
         AnimateWindowSize(width: PillExpandedWidth, height: WindowExpandedHeight, dockShowing: true);
         AnimateDockDrawer(visible: true);
         AnimateCornerButtons(visible: true);
@@ -1121,6 +1130,11 @@ public partial class FloatingPillWindow : Window
 
     private void CloseDock()
     {
+        // Restore pill's full 8 px rounded corners. Snap at start of CloseDock —
+        // the brief overlap between the round bottom and the still-visible
+        // dock is during a fade/slide-out animation, so the artifact is
+        // visually subordinate to the "going away" cue.
+        PillSurface.CornerRadius = new CornerRadius(8);
         AnimateWindowSize(width: PillCollapsedWidth, height: WindowCollapsedHeight, dockShowing: false);
         AnimateDockDrawer(visible: false);
         AnimateCornerButtons(visible: false);
