@@ -400,8 +400,27 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0">
-                                <TextBlock Text="Microphone level"
-                                           Style="{StaticResource Type.RowTitle}"/>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="Microphone level"
+                                               Style="{StaticResource Type.RowTitle}"
+                                               VerticalAlignment="Center"/>
+                                    <!-- LIVE indicator — visible only while WasapiCapture is open,
+                                         per the skill's progressive-disclosure + privacy-affordance
+                                         rules. Toggled in StartAudioMeter / StopAudioMeter. -->
+                                    <StackPanel x:Name="LiveIndicator"
+                                                Orientation="Horizontal"
+                                                VerticalAlignment="Center"
+                                                Margin="10,0,0,0"
+                                                Visibility="Collapsed">
+                                        <Ellipse Style="{StaticResource Dot.Mint}"
+                                                 Width="6" Height="6"/>
+                                        <TextBlock Text="LIVE"
+                                                   Style="{StaticResource Type.Eyebrow}"
+                                                   Foreground="{DynamicResource Mint}"
+                                                   Margin="6,0,0,0"
+                                                   VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </StackPanel>
                                 <TextBlock Text="Active only while this tab is open. Audio is never recorded."
                                            Style="{StaticResource Type.RowSubtitle}"/>
                             </StackPanel>
@@ -432,10 +451,47 @@
                         </Grid>
                     </Border>
 
-                    <!-- "Test transcription" section removed per APP_DESIGN §13.5 (P0-2):
-                         the Test button was permanently disabled with a "lands later"
-                         note; per §13.2, deferred features hide their UI rather than
-                         ship a promise-with-no-affordance. Restore in W3 when wired. -->
+                    <!-- Test transcription. State-driven UI per the skill's loading-buttons +
+                         submit-feedback + error-recovery rules:
+                         Idle → Recording (5s countdown) → Transcribing (spinner) → Result/Error.
+                         The level meter pauses while the test records to avoid device contention. -->
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Test transcription"/>
+                    <Border Style="{StaticResource RowCard}">
+                        <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="5-second sample"
+                                               Style="{StaticResource Type.RowTitle}"/>
+                                    <TextBlock x:Name="TestSubtitle"
+                                               Text="Click Test, speak for 5 seconds, see what KusPus heard."
+                                               Style="{StaticResource Type.RowSubtitle}"/>
+                                </StackPanel>
+                                <Button x:Name="TestButton"
+                                        Grid.Column="1"
+                                        Content="Test transcription"
+                                        Style="{StaticResource Btn.Primary}"
+                                        VerticalAlignment="Center"
+                                        Click="OnTestTranscriptionClick"/>
+                            </Grid>
+                            <Border x:Name="TestResultContainer"
+                                    Background="{DynamicResource SurfaceInput}"
+                                    BorderBrush="{DynamicResource BorderSubtle}"
+                                    BorderThickness="1"
+                                    CornerRadius="6"
+                                    Padding="14,12"
+                                    Margin="0,14,0,0"
+                                    Visibility="Collapsed">
+                                <TextBlock x:Name="TestResultText"
+                                           Text=""
+                                           Style="{StaticResource Type.BodySmall}"
+                                           Margin="0"/>
+                            </Border>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
 
                 <!-- ── Models tab ───────────────────────────────────────── -->

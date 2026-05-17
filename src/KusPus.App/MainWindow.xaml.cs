@@ -38,6 +38,9 @@ namespace KusPus.App;
 /// Closing the window <see cref="Hide"/>s it (§3.1 + §8.5) — quit is only via the
 /// tray menu.
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Microsoft.Design", "CA1001:Types that own disposable fields should be disposable",
+    Justification = "MainWindow inherits from System.Windows.Window which owns its own lifecycle. All disposable fields are cleaned up in OnClosing (after _allowClose flips) — making MainWindow IDisposable would conflict with WPF's window-lifecycle model. Matches the same suppression on App.")]
 public partial class MainWindow : Window
 {
     // ── DWM ─────────────────────────────────────────────────────────────────
@@ -53,6 +56,8 @@ public partial class MainWindow : Window
     private readonly IModelManager _models;
     private readonly IHistoryStore _history;
     private readonly AppCoordinator _coordinator;
+    private readonly KusPus.Audio.IAudioRecorder _audio;
+    private readonly IWhisperRunner _whisper;
     private readonly ILogger<MainWindow> _logger;
     private bool _loaded;
     private bool _allowClose;
@@ -90,6 +95,8 @@ public partial class MainWindow : Window
         IModelManager models,
         IHistoryStore history,
         AppCoordinator coordinator,
+        KusPus.Audio.IAudioRecorder audio,
+        IWhisperRunner whisper,
         ILogger<MainWindow>? logger = null)
     {
         _prefs = prefs;
@@ -97,11 +104,19 @@ public partial class MainWindow : Window
         _models = models;
         _history = history;
         _coordinator = coordinator;
+        _audio = audio;
+        _whisper = whisper;
         _logger = logger ?? NullLogger<MainWindow>.Instance;
         InitializeComponent();
         SourceInitialized += OnSourceInitialized;
         Loaded += OnLoaded;
         Closing += OnClosing;
+        // P0 mic-always-on bug fix: when the Preferences window is hidden via
+        // its X button (hide-instead-of-close per §3.1), the Audio tab's
+        // WasapiCapture must release the mic. Without this hook, the mic icon
+        // stays in the system "in-use" tray indefinitely after the user closes
+        // the window. IsVisibleChanged fires for both Hide() and Show().
+        IsVisibleChanged += OnIsVisibleChanged;
         PreviewKeyDown += OnPreviewKeyDown;
         PreviewKeyUp += OnPreviewKeyUp;
     }
@@ -244,11 +259,31 @@ public partial class MainWindow : Window
             _prefsSubscription = null;
             _coordinatorSubscription?.Dispose();
             _coordinatorSubscription = null;
+            _testCts?.Cancel();
+            _testCts?.Dispose();
+            _testCts = null;
+            StopAudioMeter();
             return;
         }
         // §3.1 / §8.5: close hides; only the tray's Quit fully exits.
         e.Cancel = true;
         Hide();
+    }
+
+    // P0 mic-bug fix: tie the level-meter WasapiCapture lifetime to the window's
+    // visibility, not just to the tab-selection state. Without this, a user on
+    // the Audio tab who clicks X keeps the mic in-use indefinitely.
+    private void OnIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (!IsVisible)
+        {
+            StopAudioMeter();
+        }
+        else if (ContentAudio.Visibility == Visibility.Visible)
+        {
+            // Reopened to the Audio tab — resume the meter.
+            StartAudioMeter();
+        }
     }
 
     /// <summary>
@@ -805,6 +840,12 @@ public partial class MainWindow : Window
             _meterTimer.Tick += OnMeterTick;
         }
         _meterTimer.Start();
+        // LIVE indicator visible whenever the meter capture is open. Privacy
+        // signal so the user knows the mic is actually in use.
+        if (LiveIndicator is not null)
+        {
+            LiveIndicator.Visibility = Visibility.Visible;
+        }
     }
 
     private void StopAudioMeter()
@@ -819,6 +860,196 @@ public partial class MainWindow : Window
             _audioMeterCapture = null;
         }
         _currentPeak = 0;
+        if (LiveIndicator is not null)
+        {
+            LiveIndicator.Visibility = Visibility.Collapsed;
+        }
+        // Reset meter visuals so a paused meter doesn't show stale levels.
+        if (LevelMeterFill is not null)
+        {
+            LevelMeterFill.Width = 0;
+            LevelMeterPeak.Opacity = 0;
+        }
+    }
+
+    // ── Test transcription (audit follow-up — restored from W1 placeholder) ────
+    // State machine: Idle → Recording (5 s countdown) → Transcribing → Result/Error.
+    // The level meter is paused during Recording to avoid double-opening the mic
+    // (WasapiCapture shared mode usually allows it but a few drivers fail). When
+    // the test finishes (success OR error), the meter resumes if the Audio tab
+    // is still visible.
+
+    private enum TestState { Idle, Recording, Transcribing, Result, Error }
+
+    private TestState _testState = TestState.Idle;
+    private DispatcherTimer? _testCountdownTimer;
+    private int _testCountdownRemaining;
+    private CancellationTokenSource? _testCts;
+
+    private async void OnTestTranscriptionClick(object sender, RoutedEventArgs e)
+    {
+        if (_testState is TestState.Recording or TestState.Transcribing)
+        {
+            // In-flight test → button doubles as Cancel.
+            _testCts?.Cancel();
+            return;
+        }
+        await RunTestTranscriptionAsync().ConfigureAwait(true);
+    }
+
+    private async Task RunTestTranscriptionAsync()
+    {
+        _testCts = new CancellationTokenSource();
+        var ct = _testCts.Token;
+
+        // Resolve the active model before we open the mic — fast-fail if missing.
+        var modelId = _prefs.Current.Models.ActiveModelId;
+        var customPath = _prefs.Current.Models.CustomModelPath;
+        var resolved = _models.Resolve(modelId, customPath);
+        if (!resolved.Success)
+        {
+            SetTestState(TestState.Error, resolved.Error ?? "Active model unavailable.");
+            return;
+        }
+
+        // Pause meter to release the mic for the recorder.
+        bool wasAudioTab = ContentAudio.Visibility == Visibility.Visible;
+        StopAudioMeter();
+
+        try
+        {
+            SetTestState(TestState.Recording, "Recording… 5 seconds remaining");
+            var startResult = await _audio.StartAsync(ct).ConfigureAwait(true);
+            if (!startResult.Success)
+            {
+                SetTestState(TestState.Error, startResult.Error ?? "Mic open failed.");
+                return;
+            }
+
+            StartTestCountdown();
+            await Task.Delay(TimeSpan.FromSeconds(5), ct).ConfigureAwait(true);
+            StopTestCountdown();
+
+            var stopResult = await _audio.StopAsync().ConfigureAwait(true);
+            if (!stopResult.Success)
+            {
+                SetTestState(TestState.Error, stopResult.Error ?? "Mic stop failed.");
+                return;
+            }
+
+            SetTestState(TestState.Transcribing, "Transcribing…");
+            var transcript = await _whisper
+                .TranscribeAsync(stopResult.Value!.WavPath, resolved.Value!, ct)
+                .ConfigureAwait(true);
+
+            try { File.Delete(stopResult.Value.WavPath); }
+            catch (IOException) { /* best-effort cleanup of the temp wav */ }
+
+            if (!transcript.Success)
+            {
+                SetTestState(TestState.Error, transcript.Error ?? "Transcribe failed.");
+                return;
+            }
+
+            var text = string.IsNullOrWhiteSpace(transcript.Value)
+                ? "(no speech detected)"
+                : transcript.Value!.Trim();
+            SetTestState(TestState.Result, text);
+        }
+        catch (OperationCanceledException)
+        {
+            StopTestCountdown();
+            try { await _audio.StopAsync().ConfigureAwait(true); }
+            catch { /* best-effort */ }
+            SetTestState(TestState.Idle, "Click Test, speak for 5 seconds, see what KusPus heard.");
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException)
+        {
+#pragma warning disable CA1848, CA1873
+            _logger.LogWarning(ex, "Test transcription failed unexpectedly.");
+#pragma warning restore CA1848, CA1873
+            SetTestState(TestState.Error, "Unexpected error — see logs.");
+        }
+        finally
+        {
+            _testCts?.Dispose();
+            _testCts = null;
+            // Resume meter if user is still on the Audio tab and window is visible.
+            if (wasAudioTab && IsVisible && ContentAudio.Visibility == Visibility.Visible)
+            {
+                StartAudioMeter();
+            }
+        }
+    }
+
+    private void StartTestCountdown()
+    {
+        _testCountdownRemaining = 5;
+        _testCountdownTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromSeconds(1),
+        };
+        _testCountdownTimer.Tick += (_, _) =>
+        {
+            _testCountdownRemaining--;
+            if (_testCountdownRemaining <= 0)
+            {
+                _testCountdownTimer?.Stop();
+                return;
+            }
+            if (_testState == TestState.Recording)
+            {
+                TestSubtitle.Text = $"Recording… {_testCountdownRemaining} second{(_testCountdownRemaining == 1 ? string.Empty : "s")} remaining";
+            }
+        };
+        _testCountdownTimer.Start();
+    }
+
+    private void StopTestCountdown()
+    {
+        _testCountdownTimer?.Stop();
+        _testCountdownTimer = null;
+    }
+
+    private void SetTestState(TestState state, string subtitleOrResult)
+    {
+        _testState = state;
+        switch (state)
+        {
+            case TestState.Idle:
+                TestSubtitle.Text = subtitleOrResult;
+                TestButton.Content = "Test transcription";
+                TestButton.Style = (Style)System.Windows.Application.Current.FindResource("Btn.Primary");
+                TestButton.IsEnabled = true;
+                TestResultContainer.Visibility = Visibility.Collapsed;
+                break;
+            case TestState.Recording:
+            case TestState.Transcribing:
+                TestSubtitle.Text = subtitleOrResult;
+                TestButton.Content = "Cancel";
+                TestButton.Style = (Style)System.Windows.Application.Current.FindResource("Btn.Ghost");
+                TestButton.IsEnabled = true;
+                TestResultContainer.Visibility = Visibility.Collapsed;
+                break;
+            case TestState.Result:
+                TestSubtitle.Text = "Heard:";
+                TestButton.Content = "Test again";
+                TestButton.Style = (Style)System.Windows.Application.Current.FindResource("Btn.Secondary");
+                TestButton.IsEnabled = true;
+                TestResultText.Text = subtitleOrResult;
+                TestResultText.Foreground = Theme("PrimaryText");
+                TestResultContainer.Visibility = Visibility.Visible;
+                break;
+            case TestState.Error:
+                TestSubtitle.Text = "Test failed.";
+                TestButton.Content = "Retry";
+                TestButton.Style = (Style)System.Windows.Application.Current.FindResource("Btn.Secondary");
+                TestButton.IsEnabled = true;
+                TestResultText.Text = subtitleOrResult;
+                TestResultText.Foreground = Theme("ErrorRed");
+                TestResultContainer.Visibility = Visibility.Visible;
+                break;
+        }
     }
 
     private void OnMeterDataAvailable(object? sender, NAudio.Wave.WaveInEventArgs e)

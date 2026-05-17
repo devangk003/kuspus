@@ -107,6 +107,8 @@ public partial class App : System.Windows.Application
             _services.GetRequiredService<IModelManager>(),
             _services.GetRequiredService<IHistoryStore>(),
             _coordinator,
+            _services.GetRequiredService<IAudioRecorder>(),
+            _services.GetRequiredService<IWhisperRunner>(),
             _services.GetService<ILogger<MainWindow>>());
 
         // Pill's hover-extended Settings button opens Preferences too (audit follow-
