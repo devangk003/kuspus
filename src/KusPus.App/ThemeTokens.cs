@@ -67,9 +67,10 @@ internal static class ThemeTokens
             // Pill-specific tokens — used by FloatingPillWindow. Pill body must
             // adopt the user's theme; gradient is installed separately by
             // BuildPillSurfaceGradient because it's a LinearGradientBrush.
+            // VisualizerBarActive is ALSO installed separately — light theme gets
+            // a mint gradient to echo the icon.svg bars per user audit feedback.
             ["PillBorder"]            = (FromHex("#12FFFFFF"), FromHex("#0F000000")),
             ["PillInnerHighlight"]    = (FromHex("#0DFFFFFF"), FromHex("#B3FFFFFF")),
-            ["VisualizerBarActive"]   = (FromHex("#EBFFFFFF"), FromHex("#D9141414")),
             ["VisualizerBarIdle"]     = (FromHex("#47FFFFFF"), FromHex("#40141414")),
 
             // Audio-tab meter (9E UX refresh) — Discord-style track + fill.
@@ -96,6 +97,7 @@ internal static class ThemeTokens
             appResources[key] = new SolidColorBrush(color);
         }
         appResources["PillSurface"] = BuildPillSurfaceGradient(mode);
+        appResources["VisualizerBarActive"] = BuildVisualizerBarActive(mode);
     }
 
     /// <summary>
@@ -103,6 +105,37 @@ internal static class ThemeTokens
     /// LinearGradientBrush isn't in <see cref="Map"/> because it's compound (two
     /// stops per theme) and doesn't fit the single-Color-pair shape.
     /// </summary>
+    /// <summary>
+    /// Light theme: vertical mint gradient on the visualizer bars echoing the
+    /// pearly-mint stops of icon.svg (top off-white → mid pearl → bottom mint),
+    /// scaled to readable contrast against the light pill surface. Dark theme:
+    /// solid bright fill (the historical token value) — gradient mint on dark
+    /// would fight the active visualizer's "voice on top" reading. Per user
+    /// audit feedback that the bars should look like the icon's gradient bars.
+    /// </summary>
+    private static System.Windows.Media.Brush BuildVisualizerBarActive(ThemeApply.Mode mode)
+    {
+        if (mode == ThemeApply.Mode.Dark)
+        {
+            // Solid white-ish, unchanged — matches the original token.
+            return new SolidColorBrush(FromHex("#EBFFFFFF"));
+        }
+        // Light theme — three-stop vertical mint gradient. Alpha climbs from
+        // top (subtle) to bottom (fully readable) so each bar reads as "lit up"
+        // from below, echoing the icon's vertical mint shading.
+        var brush = new System.Windows.Media.LinearGradientBrush(
+            new System.Windows.Media.GradientStopCollection
+            {
+                new System.Windows.Media.GradientStop(FromHex("#664DDBA6"), 0.0),
+                new System.Windows.Media.GradientStop(FromHex("#994DDBA6"), 0.5),
+                new System.Windows.Media.GradientStop(FromHex("#CC1F8762"), 1.0),
+            },
+            new System.Windows.Point(0, 0),
+            new System.Windows.Point(0, 1));
+        brush.Freeze();
+        return brush;
+    }
+
     private static System.Windows.Media.LinearGradientBrush BuildPillSurfaceGradient(ThemeApply.Mode mode)
     {
         var (top, bottom) = mode == ThemeApply.Mode.Dark
