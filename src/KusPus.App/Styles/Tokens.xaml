@@ -1,5 +1,6 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
     <!--
         Canonical spacing + corner-radius token scale per docs/APP_DESIGN.md §13.5
         audit Wave A. Centralises every Margin / Padding / CornerRadius literal
@@ -27,6 +28,14 @@
             Radius.Sm  — 4  (chips, small inline glyph backings)
             Radius.Md  — 6  (row cards, inputs)
             Radius.Lg  — 8  (hero cards, modals, the pill itself)
+
+        Icon font sizes (double, used as TextBlock.FontSize on Segoe Fluent Icons
+        glyphs in pill chrome / tray menu / row icons). Two-step scale:
+            Icon.Glyph    — 11  (action icons: mic, settings, close, pin, wand)
+            Icon.Chevron  —  9  (small directional indicators: ▾ open, ▸ deep-link)
+        Reach for these instead of literal FontSize="10/11/12" on a glyph — keeps
+        the icon rhythm visually unified across the pill, tray, dock, and any
+        future chrome.
     -->
 
     <Thickness x:Key="Space.xs">4</Thickness>
@@ -43,5 +52,8 @@
     <CornerRadius x:Key="Radius.Sm">4</CornerRadius>
     <CornerRadius x:Key="Radius.Md">6</CornerRadius>
     <CornerRadius x:Key="Radius.Lg">8</CornerRadius>
+
+    <sys:Double x:Key="Icon.Glyph">11</sys:Double>
+    <sys:Double x:Key="Icon.Chevron">9</sys:Double>
 
 </ResourceDictionary>

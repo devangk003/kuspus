@@ -593,14 +593,13 @@ public partial class FloatingPillWindow : Window
 
         // Dock's record glyph reflects FSM state: dot when not recording,
         // filled red square when actively recording (so the toggle's affordance
-        // matches "press to stop"). Hide the nudge once recording truly begins
-        // since it served its purpose.
+        // matches "press to stop").
         UpdateRecordGlyph(next);
-        if (next == PillVisual.Recording)
-        {
-            RecordNudgePopup.IsOpen = false;
-            _nudgeTimer?.Stop();
-        }
+        // NOTE: do NOT auto-dismiss RecordNudgePopup on Recording transition.
+        // ToggleFromTray dispatches the recording snapshot within a few ms of
+        // the click, so a dismiss-on-Recording rule killed the nudge before
+        // the user could read it. The 10 s timer in ShowRecordNudge is the
+        // only dismissal path now.
 
         // Accent line + glow per §3.4 opacity table. Idle and Hidden both render
         // the accent line invisible.
@@ -925,6 +924,14 @@ public partial class FloatingPillWindow : Window
         {
             return;
         }
+        // Pin = positional lock per UX audit: when pinned, the pill cannot be
+        // dragged. User must unpin to move it again. The pin glyph itself is
+        // the affordance — the change in interaction matches the visual change
+        // (mint-tinted glyph + always-visible).
+        if (_isPinned)
+        {
+            return;
+        }
 
         _isDragging = true;
         try
@@ -1201,6 +1208,16 @@ public partial class FloatingPillWindow : Window
         // Mint tint glyph when pinned.
         PinGlyph.SetResourceReference(TextBlock.ForegroundProperty,
             _isPinned ? "Mint" : "SecondaryText");
+        // Compact record button visibility follows pin state so the user can
+        // still trigger recording without unpinning (per UX audit issue #2).
+        CompactRecordButton.Visibility = _isPinned
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        // Drag cursor follows pinned state — SizeAll telegraphs "drag-anywhere"
+        // when unpinned, Arrow when pinned (drag is disabled per the pin lock).
+        PillSurface.Cursor = _isPinned
+            ? System.Windows.Input.Cursors.Arrow
+            : System.Windows.Input.Cursors.SizeAll;
         if (_isPinned)
         {
             // Compact mode (user spec): contract pill + slide dock back, even
@@ -1223,10 +1240,14 @@ public partial class FloatingPillWindow : Window
     {
         // RadiusX=4 + W=8 renders as a circle (radius = half side). Drop the
         // radius to 1.5 and it reads as a filled rounded square — the canonical
-        // "press to stop" affordance.
+        // "press to stop" affordance. Mirror the change on the compact corner
+        // record button so both icons stay in sync.
         bool recording = state == PillVisual.Recording;
-        RecordGlyph.RadiusX = recording ? 1.5 : 4;
-        RecordGlyph.RadiusY = recording ? 1.5 : 4;
+        double r = recording ? 1.5 : 4;
+        RecordGlyph.RadiusX = r;
+        RecordGlyph.RadiusY = r;
+        CompactRecordGlyph.RadiusX = r;
+        CompactRecordGlyph.RadiusY = r;
     }
 
     private void OnRecordToggleClick(object sender, RoutedEventArgs e)
@@ -1247,13 +1268,14 @@ public partial class FloatingPillWindow : Window
 
     private void ShowRecordNudge()
     {
-        // 6s display per user feedback — the previous 3 s window dismissed
-        // before the user could read it. Auto-dismisses when state moves to
-        // Recording (Render() / TransitionTo) so the nudge doesn't linger
-        // after dictation actually started.
+        // 10s display. Sole dismissal path — the earlier "auto-dismiss when
+        // state == Recording" rule was wrong: ToggleFromTray flips the FSM
+        // to Recording within a few ms of the click, so the nudge popped
+        // and vanished before the user could read it. A pure timer is the
+        // correct gate for an informational hint.
         _nudgeTimer?.Stop();
         RecordNudgePopup.IsOpen = true;
-        _nudgeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(6) };
+        _nudgeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
         _nudgeTimer.Tick += (_, _) =>
         {
             _nudgeTimer?.Stop();
