@@ -288,7 +288,7 @@ Bundled subprocess:
 | Clipboard contents | PasteEngine | OS clipboard | OS clipboard (replaces prior) | **No** |
 | History records | HistoryStore | SQLite | `%LOCALAPPDATA%\KusPus\history.db` | **No** |
 | Settings | PrefsStore | `settings.json` | `%APPDATA%\KusPus\settings.json` | **No** |
-| Model files | HTTPS download | ModelManager | `%LOCALAPPDATA%\KusPus\models\*.bin` | **OUT** to huggingface.co (allowlisted) |
+| Model files | HTTPS download | ModelManager | `{app}\whisper\models\*.bin` (CFA-friendly install-dir location since 2026-05-17; was `%LOCALAPPDATA%\KusPus\models\`) | **OUT** to huggingface.co (allowlisted) |
 | Crash minidumps | Sentry SDK | Scrubber → Sentry | sentry.io (opt-in) | **OUT** to sentry.io (allowlisted, opt-in only) |
 | Logs | LogSink | Rotating file appender | `%LOCALAPPDATA%\KusPus\logs\*.log` | **No** |
 | Failed audio | AudioRecorder on transcribe failure | Filesystem | `%LOCALAPPDATA%\KusPus\failed\` (24 h auto-prune) | **No** |

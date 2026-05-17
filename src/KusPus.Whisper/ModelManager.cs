@@ -83,34 +83,6 @@ public sealed class ModelManager : IModelManager
         var path = Path.Combine(_modelsDirectory, found.FileName);
         if (!File.Exists(path))
         {
-            // Diagnostic dump (Phase 12 dogfood — rc2 installed app reports
-            // "missing on disk" even when PowerShell sees the file at the
-            // exact path the app logs). Captures: raw modelsDirectory string,
-            // whether the directory exists at all, the file path being
-            // checked, what files ARE in the directory if it exists. Helps
-            // isolate path-construction vs file-access vs sandbox-redirect
-            // root causes.
-            _logger.LogWarning(
-                "Resolve diagnostic — modelsDirectory='{Dir}' dirExists={DirExists} " +
-                "fileName='{Name}' fullPath='{Path}' fileExists={FileExists}",
-                _modelsDirectory,
-                Directory.Exists(_modelsDirectory),
-                found.FileName,
-                path,
-                File.Exists(path));
-            if (Directory.Exists(_modelsDirectory))
-            {
-                try
-                {
-                    var contents = string.Join(", ", Directory.GetFiles(_modelsDirectory)
-                        .Select(Path.GetFileName));
-                    _logger.LogWarning("Resolve diagnostic — directory contents: [{Contents}]", contents);
-                }
-                catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
-                {
-                    _logger.LogWarning(ex, "Resolve diagnostic — couldn't enumerate {Dir}.", _modelsDirectory);
-                }
-            }
             return Result.Fail<ResolvedModel>($"Model file missing on disk: {path}");
         }
 

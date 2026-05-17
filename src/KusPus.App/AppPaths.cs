@@ -18,8 +18,6 @@ internal static class AppPaths
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "KusPus");
 
-    public static readonly string ModelsDir = Path.Combine(LocalDataDir, "models");
-
     public static readonly string LogsDir = Path.Combine(LocalDataDir, "logs");
 
     public static readonly string FailedDir = Path.Combine(LocalDataDir, "failed");
@@ -27,13 +25,25 @@ internal static class AppPaths
     public static readonly string HistoryDbPath = Path.Combine(LocalDataDir, "history.db");
 
     /// <summary>
-    /// Where whisper.exe + DLLs live. Per TECH_SPEC §7.2 this is alongside the app exe;
+    /// Where whisper.exe + DLLs live. Alongside the app exe per TECH_SPEC §7.2;
     /// developers running from <c>dotnet run</c> can override by setting
     /// <c>KUSPUS_WHISPER_DIR</c> in the environment.
     /// </summary>
     public static string WhisperDir =>
         Environment.GetEnvironmentVariable("KUSPUS_WHISPER_DIR")
         ?? Path.Combine(AppContext.BaseDirectory, "whisper");
+
+    /// <summary>
+    /// Where downloaded model .bin files live. Inside the whisper subdir of
+    /// the install directory rather than under <c>%LOCALAPPDATA%\KusPus\</c>
+    /// per dogfood finding 2026-05-17: Controlled Folder Access (Defender's
+    /// ransomware protection) blocks unsigned apps from listing files in
+    /// user-data paths but trusts them in their own install directory.
+    /// Override with <c>KUSPUS_MODELS_DIR</c> for tests / portable layouts.
+    /// </summary>
+    public static string ModelsDir =>
+        Environment.GetEnvironmentVariable("KUSPUS_MODELS_DIR")
+        ?? Path.Combine(WhisperDir, "models");
 
     /// <summary>
     /// Expected SHA-256 of <c>whisper.exe</c>. Empty string ⇒ integrity check

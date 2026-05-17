@@ -128,21 +128,73 @@ Write-Host "    Copied $($dlls.Count) DLL(s) + whisper.exe"
 # ── 8. Tag marker for idempotency ─────────────────────────────────────────
 Set-Content -LiteralPath $tagMarker -Value $Tag -Encoding utf8
 
-# ── 9. SHA-256 manifest ───────────────────────────────────────────────────
+# ── 9. Bundle tiny.en model ───────────────────────────────────────────────
+# Per PRD §6.4: tiny.en ships pre-installed so first launch works offline.
+# Source of truth for URL + expected SHA = src/KusPus.Whisper/Resources/models.json
+# (the same manifest the runtime ModelManager reads). Cached by SHA so a
+# successful download is reused across script invocations.
+Write-Step "Bundling tiny.en model"
+$manifestPath = Join-Path $repoRoot 'src\KusPus.Whisper\Resources\models.json'
+$manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+$tiny = $manifest.models | Where-Object { $_.id -eq 'ggml-tiny.en' } | Select-Object -First 1
+if (-not $tiny) {
+    throw "models.json is missing the ggml-tiny.en entry - cannot bundle the model."
+}
+
+$modelsDir = Join-Path $payload 'models'
+New-Item -ItemType Directory -Force -Path $modelsDir | Out-Null
+$modelDest = Join-Path $modelsDir $tiny.fileName
+
+$modelCacheDir = Join-Path $repoRoot '.local-temp\model-cache'
+New-Item -ItemType Directory -Force -Path $modelCacheDir | Out-Null
+$modelCached = Join-Path $modelCacheDir "$($tiny.sha256)-$($tiny.fileName)"
+
+if (-not (Test-Path $modelCached) -or $Force) {
+    Write-Host "    Downloading $($tiny.fileName) (~$([math]::Round($tiny.sizeBytes / 1MB, 0)) MB) from $($tiny.url)"
+    $previousProgressPreference = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+    try {
+        Invoke-WebRequest -Uri $tiny.url -OutFile $modelCached -UseBasicParsing
+    }
+    finally {
+        $ProgressPreference = $previousProgressPreference
+    }
+}
+else {
+    Write-Host "    Cached: $modelCached" -ForegroundColor Green
+}
+
+# SHA gate — fail loudly if HuggingFace served a different file (mirror change,
+# upstream re-upload, MITM). Forces the bundle to match what runtime ModelManager
+# will verify the file against on launch.
+$actualTinySha = (Get-FileHash -Algorithm SHA256 -LiteralPath $modelCached).Hash.ToLowerInvariant()
+if ($actualTinySha -ne $tiny.sha256) {
+    Remove-Item -LiteralPath $modelCached -ErrorAction SilentlyContinue
+    throw "tiny.en SHA mismatch. Expected $($tiny.sha256), got $actualTinySha. Cache file deleted; rerun."
+}
+
+Copy-Item -LiteralPath $modelCached -Destination $modelDest -Force
+Write-Host "    Bundled: $modelDest"
+
+# ── 10. SHA-256 manifest ──────────────────────────────────────────────────
+# Lists whisper.exe + DLLs + bundled model.bin so the installer can publish
+# a single integrity manifest. WhisperRunner reads this at startup.
 Write-Step "Computing SHA-256 manifest"
 $shaPath = Join-Path $payload 'SHA256SUMS'
-$lines = Get-ChildItem -Path $payload -File |
+$lines = Get-ChildItem -Path $payload -File -Recurse |
     Where-Object { $_.Name -notin @('SHA256SUMS', '.tag') } |
-    Sort-Object Name |
+    Sort-Object FullName |
     ForEach-Object {
         $h = (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant()
-        "$h  $($_.Name)"
+        # Relative path so SHA256SUMS lines aren't tied to build-machine layout.
+        $rel = $_.FullName.Substring($payload.Length).TrimStart('\').Replace('\', '/')
+        "$h  $rel"
     }
 Set-Content -LiteralPath $shaPath -Value $lines -Encoding utf8
 Write-Host ""
 $lines | ForEach-Object { Write-Host "    $_" }
 
-# ── 10. Smoke test ────────────────────────────────────────────────────────
+# ── 11. Smoke test ────────────────────────────────────────────────────────
 Write-Step "Smoke testing whisper.exe -h"
 $exe = Join-Path $payload 'whisper.exe'
 # Use Start-Process (not `& $exe`) so this works in BOTH PowerShell 5.1

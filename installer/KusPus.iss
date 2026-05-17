@@ -117,6 +117,15 @@ Source: "payload\whisper\whisper.exe"; DestDir: "{app}\whisper"; Flags: ignoreve
 Source: "payload\whisper\*.dll"; DestDir: "{app}\whisper"; Flags: ignoreversion
 Source: "payload\whisper\SHA256SUMS"; DestDir: "{app}\whisper"; Flags: ignoreversion
 
+; Bundled tiny.en model (~75 MB). Per PRD §6.4 ships pre-installed so first
+; launch works offline. Lives in {app}\whisper\models\ — same path
+; AppPaths.ModelsDir resolves to. Additional models are downloaded into the
+; same dir at runtime by ModelManager. uninsneveruninstall keeps the file
+; on disk through a reinstall/upgrade so a user who already has it doesn't
+; pay the download twice — Inno wouldn't delete user-downloaded .bin files
+; anyway, but this also covers tiny.en specifically.
+Source: "payload\whisper\models\*.bin"; DestDir: "{app}\whisper\models"; Flags: ignoreversion uninsneveruninstall
+
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
