@@ -72,7 +72,7 @@ MIT — see [LICENSE](LICENSE).
 ---
 
 <div align="center">
-  Built solo by <a href="https://lnk.bio/devangk003">Devang Kumawat</a>. Designer-engineer at <a href="https://crewm8.ai">CrewM8</a>.
+  Built solo by <a href="https://lnk.bio/devangk003">Devang Kumawat</a>. Designer-engineer.
 
   <br/>
   <strong>Local · Privacy · First</strong>
