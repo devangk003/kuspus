@@ -1167,18 +1167,22 @@ public partial class MainWindow : Window
         }
     }
 
+    // Model row — explicit action buttons per state, no radio button.
+    // Per UI UX Pro Max convention for state-rich cards: visual state is carried
+    // by (a) a 4 px left-edge accent strip + (b) the right-side CTA, NOT by a
+    // radio toggle. Active card additionally gets a MintTint surface.
+    //
+    // State machine:
+    //   Active        — MintTint card, mint accent, ACTIVE badge (no button — already in use)
+    //   Installed     — neutral card, no accent, "Use this model" Btn.Primary
+    //   Not installed — neutral card, no accent, "Download" Btn.Secondary
+    //   Downloading   — neutral card, mint accent, progress + percent + Cancel ghost
+    //   Failed        — neutral card, red accent, error text + Retry secondary
     private Border BuildModelRow(ModelDescriptor m, bool installed, bool isActive, bool isLast)
     {
-        var radio = new System.Windows.Controls.RadioButton
-        {
-            GroupName = "ActiveModel",
-            IsChecked = isActive,
-            IsEnabled = installed,
-            Tag = m.Id,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, 0, 14, 0),
-        };
-        radio.Checked += OnModelRadioChecked;
+        _modelDownloads.TryGetValue(m.Id, out var ds);
+        bool isDownloading = ds?.Cts is not null;
+        bool isFailed = ds?.Error is not null && ds.Cts is null;
 
         var titleRow = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal };
         var titleText = new TextBlock
@@ -1192,47 +1196,182 @@ public partial class MainWindow : Window
         {
             titleRow.Children.Add(BuildBundledBadge());
         }
+        if (isActive)
+        {
+            titleRow.Children.Add(BuildActiveBadge());
+        }
 
         var subtitle = new TextBlock
         {
             Text = $"{FormatSize(m.SizeBytes)} · {SpeedLabel(m.Id)}",
             Style = TypeStyle("Type.RowSubtitle"),
-            // Style provides Margin 0,3,0,0; no override needed.
         };
 
         var labelStack = new StackPanel();
         labelStack.Children.Add(titleRow);
         labelStack.Children.Add(subtitle);
 
-        // Right-side region depends on state. Five visual states:
-        //   - Active        (installed + currently selected) — mint dot + "Active"
-        //   - Installed     (installed but not active)       — muted "Installed"
-        //   - Downloading   (in flight)                      — progress bar + percent + Cancel
-        //   - Error         (failed previously)              — red text + Retry
-        //   - Not installed (default)                        — Download Btn.Secondary
-        // §13.5 P1-4.
-        UIElement statusRegion = BuildModelStatusRegion(m, installed, isActive);
+        UIElement actionRegion = BuildModelActionRegion(m, installed, isActive, isDownloading, isFailed, ds);
+
+        // 4 px left-edge accent strip — color depends on state.
+        var accent = new Border
+        {
+            Width = 4,
+            HorizontalAlignment = System.Windows.HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Stretch,
+            CornerRadius = new CornerRadius(2, 0, 0, 2),
+        };
+        if (isFailed)
+        {
+            accent.Background = Theme("ErrorRed");
+        }
+        else if (isActive || isDownloading)
+        {
+            accent.Background = Theme("Mint");
+        }
+        else
+        {
+            accent.Background = System.Windows.Media.Brushes.Transparent;
+        }
 
         var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        Grid.SetColumn(radio, 0);
+        // Accent spans the full row height — sits in col 0.
+        Grid.SetColumn(accent, 0);
+        // 14 px gutter between accent and label so the strip reads as a separator,
+        // not as part of the label.
+        labelStack.Margin = new Thickness(14, 0, 0, 0);
         Grid.SetColumn(labelStack, 1);
-        Grid.SetColumn(statusRegion, 2);
-        grid.Children.Add(radio);
+        Grid.SetColumn(actionRegion, 2);
+        grid.Children.Add(accent);
         grid.Children.Add(labelStack);
-        grid.Children.Add(statusRegion);
+        grid.Children.Add(actionRegion);
 
         var border = new Border
         {
             Style = (Style)FindResource("RowCard"),
-            // 8 px gap reads as individual cards (user audit feedback —
-            // grouped 1 px stacking felt cramped on a list of 5+ models).
             Margin = new Thickness(0, 0, 0, isLast ? 0 : 8),
         };
+        if (isActive)
+        {
+            // Active state tints the whole card subtly so it reads as "in use"
+            // at a glance — overrides the default RowCard surface brushes.
+            border.Background = Theme("MintTint");
+            border.BorderBrush = Theme("MintBorder");
+        }
         border.Child = grid;
         return border;
+    }
+
+    private static StackPanel BuildActiveBadge()
+    {
+        // Small uppercase eyebrow chip — clearer at-a-glance than a status text.
+        return new StackPanel
+        {
+            Orientation = System.Windows.Controls.Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(8, 0, 0, 0),
+            Children =
+            {
+                new Border
+                {
+                    Background = Theme("Mint"),
+                    CornerRadius = new CornerRadius(4),
+                    Padding = new Thickness(7, 2, 7, 2),
+                    Child = new TextBlock
+                    {
+                        Text = "ACTIVE",
+                        FontFamily = new WpfFontFamily("Segoe UI Variable Text, Segoe UI"),
+                        FontSize = 10,
+                        FontWeight = FontWeights.SemiBold,
+                        Foreground = new System.Windows.Media.SolidColorBrush(
+                            System.Windows.Media.Color.FromRgb(0x0F, 0x1F, 0x18)),
+                    },
+                },
+            },
+        };
+    }
+
+    // Right-side action region — state-driven CTA per the skill's primary-action
+    // rule. Each state has exactly one button (Active has none — the action's
+    // already been performed). Replaces the old `BuildModelStatusRegion`.
+    private UIElement BuildModelActionRegion(
+        ModelDescriptor m,
+        bool installed,
+        bool isActive,
+        bool isDownloading,
+        bool isFailed,
+        ModelDownloadState? ds)
+    {
+        if (isActive)
+        {
+            // No button — card tint + ACTIVE badge already say "in use".
+            return new TextBlock { Visibility = Visibility.Collapsed };
+        }
+        if (isFailed && ds is not null)
+        {
+            return BuildModelErrorRegion(m, ds.Error!);
+        }
+        if (isDownloading && ds is not null)
+        {
+            return BuildModelDownloadingRegion(m, ds);
+        }
+        if (installed)
+        {
+            // Installed-but-not-active → primary CTA.
+            var useBtn = new System.Windows.Controls.Button
+            {
+                Content = "Use this model",
+                Style = TypeStyle("Btn.Primary"),
+                Tag = m.Id,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            useBtn.Click += OnUseModelClick;
+            return useBtn;
+        }
+        // Not installed → secondary CTA (download is a heavier commitment than a
+        // primary action — the user must know they're spending bandwidth + disk).
+        var downloadBtn = new System.Windows.Controls.Button
+        {
+            Content = "Download",
+            Style = TypeStyle("Btn.Secondary"),
+            Tag = m.Id,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        downloadBtn.Click += OnModelDownloadClick;
+        return downloadBtn;
+    }
+
+    private async void OnUseModelClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button btn || btn.Tag is not string id)
+        {
+            return;
+        }
+        var current = _prefs.Current;
+        if (current.Models.ActiveModelId == id)
+        {
+            return;
+        }
+        var next = current with { Models = current.Models with { ActiveModelId = id } };
+#pragma warning disable CA1848, CA1873
+        _logger.LogInformation("Active model changed → {Id}.", id);
+#pragma warning restore CA1848, CA1873
+        try
+        {
+            await _prefs.SaveAsync(next).ConfigureAwait(true);
+        }
+        catch (System.IO.IOException ex)
+        {
+#pragma warning disable CA1848, CA1873
+            _logger.LogWarning(ex, "PrefsStore.SaveAsync failed for ActiveModelId.");
+#pragma warning restore CA1848, CA1873
+            return;
+        }
+        _modelsRendered = false;
+        RenderModelsTab();
     }
 
     private static Border BuildBundledBadge()
@@ -1252,45 +1391,6 @@ public partial class MainWindow : Window
                 Style = TypeStyle("Type.BadgeMint"),
             },
         };
-    }
-
-    private UIElement BuildModelStatusRegion(ModelDescriptor m, bool installed, bool isActive)
-    {
-        // Error state takes precedence — if a previous download failed, surface
-        // it until the user retries (or the file is dropped in manually).
-        _modelDownloads.TryGetValue(m.Id, out var ds);
-        if (ds is not null && ds.Error is not null)
-        {
-            return BuildModelErrorRegion(m, ds.Error);
-        }
-        if (ds is not null && ds.Cts is not null)
-        {
-            return BuildModelDownloadingRegion(m, ds);
-        }
-        if (installed)
-        {
-            // Active/Installed text — color flips by state so this stays inline
-            // (no single Type.* role covers both Mint and Muted at 11.5 Medium).
-            return new TextBlock
-            {
-                Text = isActive ? "Active" : "Installed",
-                FontFamily = new WpfFontFamily("Segoe UI Variable Text, Segoe UI"),
-                FontSize = 11.5,
-                FontWeight = FontWeights.Medium,
-                Foreground = isActive ? Theme("Mint") : Theme("MutedText"),
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-        }
-        // Not installed → Download button.
-        var downloadBtn = new System.Windows.Controls.Button
-        {
-            Content = "Download",
-            Style = (Style)System.Windows.Application.Current.FindResource("Btn.Secondary"),
-            Tag = m.Id,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        downloadBtn.Click += OnModelDownloadClick;
-        return downloadBtn;
     }
 
     private StackPanel BuildModelDownloadingRegion(ModelDescriptor m, ModelDownloadState ds)
@@ -1487,40 +1587,9 @@ public partial class MainWindow : Window
         return raw.Length > 80 ? raw[..77] + "…" : raw;
     }
 
-    private async void OnModelRadioChecked(object sender, RoutedEventArgs e)
-    {
-        if (!_loaded)
-        {
-            return;
-        }
-        if (sender is not System.Windows.Controls.RadioButton rb || rb.Tag is not string id)
-        {
-            return;
-        }
-        var current = _prefs.Current;
-        if (current.Models.ActiveModelId == id)
-        {
-            return;
-        }
-        var next = current with { Models = current.Models with { ActiveModelId = id } };
-#pragma warning disable CA1848, CA1873
-        _logger.LogInformation("Active model changed → {Id}.", id);
-#pragma warning restore CA1848, CA1873
-        try
-        {
-            await _prefs.SaveAsync(next).ConfigureAwait(true);
-        }
-        catch (System.IO.IOException ex)
-        {
-#pragma warning disable CA1848, CA1873
-            _logger.LogWarning(ex, "PrefsStore.SaveAsync failed for ActiveModelId.");
-#pragma warning restore CA1848, CA1873
-            return;
-        }
-        // Re-render to update Active row + status pills.
-        _modelsRendered = false;
-        RenderModelsTab();
-    }
+    // OnModelRadioChecked removed — the Models tab redesign dropped the radio
+    // button in favor of an explicit "Use this model" Btn.Primary per row
+    // (handled by OnUseModelClick in the BuildModelRow block above).
 
     private static string FormatSize(long bytes)
     {
@@ -1656,7 +1725,12 @@ public partial class MainWindow : Window
     // (14 / 78 / 110 / * / 72 / 52). Mono font for time / model / duration columns
     // per the skill's number-tabular rule. Transcript truncates with ellipsis and
     // exposes the full text via ToolTip per the skill's truncation-strategy rule.
-    // Right-click context menu offers Copy / Delete.
+    //
+    // Row actions (Copy + Delete) per UI UX Pro Max convention for productivity
+    // tables (Gmail / Notion / Linear pattern): the model + duration cells hide
+    // on row hover and Copy / Delete IconGhost buttons take their place. Avoids
+    // permanently-visible button clutter in a read-heavy table. Right-click
+    // context menu remains as the keyboard / power-user path.
     private Border BuildHistoryRow(TranscriptRecord r)
     {
         bool ok = r.Status == TranscriptStatus.Ok;
@@ -1753,12 +1827,82 @@ public partial class MainWindow : Window
         Grid.SetColumn(duration, 5);
         grid.Children.Add(duration);
 
-        return new Border
+        // Hover-reveal actions: spans cols 4 + 5 so the right edge of the row
+        // hides the model+duration data and exposes Copy + Delete instead.
+        // Background = Surface ensures the row's HoverSubtle tint shows through
+        // around the buttons (Surface is the parent card's bg, which is what's
+        // underneath the row when not hovered).
+        var actions = new StackPanel
+        {
+            Orientation = System.Windows.Controls.Orientation.Horizontal,
+            HorizontalAlignment = System.Windows.HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            Background = Theme("Surface"),
+            Visibility = Visibility.Collapsed,
+        };
+        var copyBtn = new System.Windows.Controls.Button
+        {
+            Style = TypeStyle("Btn.IconGhost"),
+            Content = "",                         // Fluent Icons "Copy"
+            ToolTip = "Copy transcript",
+            Margin = new Thickness(0, 0, 2, 0),
+        };
+        copyBtn.Click += (_, _) => CopyTranscriptToClipboard(r);
+        var deleteBtn = new System.Windows.Controls.Button
+        {
+            Style = TypeStyle("Btn.IconGhost"),
+            Content = "",                         // Fluent Icons "Delete"
+            ToolTip = "Delete transcript",
+            Foreground = Theme("ErrorRed"),
+        };
+        deleteBtn.Click += (_, _) => _ = DeleteTranscriptAsync(r);
+        actions.Children.Add(copyBtn);
+        actions.Children.Add(deleteBtn);
+        Grid.SetColumn(actions, 4);
+        Grid.SetColumnSpan(actions, 2);
+        grid.Children.Add(actions);
+
+        var border = new Border
         {
             Style = (Style)FindResource("HistoryRow"),
             Child = grid,
             ContextMenu = BuildHistoryContextMenu(r),
         };
+        // Toggle the actions overlay on hover. The HistoryRow style's
+        // IsMouseOver trigger handles the background tint; this handles the
+        // child Visibility — keeps the show/hide logic alongside the data.
+        border.MouseEnter += (_, _) => actions.Visibility = Visibility.Visible;
+        border.MouseLeave += (_, _) => actions.Visibility = Visibility.Collapsed;
+        return border;
+    }
+
+    private void CopyTranscriptToClipboard(TranscriptRecord r)
+    {
+        try
+        {
+            System.Windows.Clipboard.SetText(r.Text);
+        }
+        catch (System.Runtime.InteropServices.COMException ex)
+        {
+#pragma warning disable CA1848, CA1873
+            _logger.LogWarning(ex, "Clipboard write failed for history Copy.");
+#pragma warning restore CA1848, CA1873
+        }
+    }
+
+    private async Task DeleteTranscriptAsync(TranscriptRecord r)
+    {
+        try
+        {
+            await _history.DeleteAsync(r.Id).ConfigureAwait(true);
+            await ReloadHistoryAsync().ConfigureAwait(true);
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException ex)
+        {
+#pragma warning disable CA1848, CA1873
+            _logger.LogWarning(ex, "DeleteAsync failed for transcript {Id}.", r.Id);
+#pragma warning restore CA1848, CA1873
+        }
     }
 
     private static string ShortModelId(string raw) =>
@@ -1769,36 +1913,11 @@ public partial class MainWindow : Window
         var menu = new System.Windows.Controls.ContextMenu();
 
         var copy = new System.Windows.Controls.MenuItem { Header = "Copy text" };
-        copy.Click += (_, _) =>
-        {
-            try
-            {
-                System.Windows.Clipboard.SetText(r.Text);
-            }
-            catch (System.Runtime.InteropServices.COMException ex)
-            {
-#pragma warning disable CA1848, CA1873
-                _logger.LogWarning(ex, "Clipboard write failed for history Copy.");
-#pragma warning restore CA1848, CA1873
-            }
-        };
+        copy.Click += (_, _) => CopyTranscriptToClipboard(r);
         menu.Items.Add(copy);
 
         var del = new System.Windows.Controls.MenuItem { Header = "Delete" };
-        del.Click += async (_, _) =>
-        {
-            try
-            {
-                await _history.DeleteAsync(r.Id).ConfigureAwait(true);
-                await ReloadHistoryAsync().ConfigureAwait(true);
-            }
-            catch (Microsoft.Data.Sqlite.SqliteException ex)
-            {
-#pragma warning disable CA1848, CA1873
-                _logger.LogWarning(ex, "DeleteAsync failed for transcript {Id}.", r.Id);
-#pragma warning restore CA1848, CA1873
-            }
-        };
+        del.Click += async (_, _) => await DeleteTranscriptAsync(r).ConfigureAwait(true);
         menu.Items.Add(del);
 
         return menu;
