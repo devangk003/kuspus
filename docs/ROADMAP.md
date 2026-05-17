@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.2 |
+| **Status** | Draft v0.3 |
 | **Scope** | Items deliberately deferred from `PRD.md` |
-| **Updated** | 2026-05-16 (v0.2: code signing made permanent non-goal; auto-update demoted; minor priority shifts for friends-only audience) |
+| **Updated** | 2026-05-17 (v0.3: added R1.2-10 long-mode chunk-on-VAD streaming on a second hotkey per dogfood UX request) |
 
 This file is the **deferred-work log** for KusPus. Items here were considered during v1.0 design and intentionally pushed out. Each entry includes: what it is, why it was deferred, and what triggers it being scheduled.
 
@@ -110,6 +110,29 @@ Themes: things that don't fix bugs but build trust and reduce friction for a wid
 - **What:** Build on R1.1-02. Add common European languages once Hinglish is shipped.
 - **Trigger:** Tester demand. Mostly a model-manager UI change.
 
+### R1.2-10 — Long-mode chunk-on-VAD continuous transcription (second hotkey)
+- **What:** Add a second hotkey (default `Ctrl+Shift+LWin`) that enters a "long-mode" recording state. Mic stays open; Silero VAD on the live stream detects natural pauses (>=600 ms silence after speech); each detected utterance is handed to `whisper.exe` and pasted into whatever's currently focused. Loop continues until the user presses the long-mode hotkey again. Existing `Ctrl+Win` push-to-talk behaviour is unchanged.
+- **Why deferred from v1:** ~2 weeks of focused build + iterate. v1's dogfood pass should validate the single-utterance UX first; layering streaming on top before the base is solid would blur which behaviour is the source of any bug.
+- **Why valuable:** Dogfood feedback from author — long-form dictation (writing prose, code comments, Slack threads) feels constrained by the one-utterance-at-a-time push-to-talk model. Streaming with paste-on-pause removes the "remember-to-release" friction without changing the trust model (still local-first, still subprocess whisper).
+- **Architecture (recommended after research, 2026-05-17):** chunk-on-VAD, NOT sliding-window. VAD runs in-process; whisper.exe stays subprocess; pastes are serialized. See https://github.com/Sharrnah/whispering for the closest reference impl.
+- **Cluster plan (each ~0.5–2 days):**
+  1. Settings — add `LongModeHotkey` to `HotkeySettings`, default `Ctrl+Shift+LWin`, MainWindow listen+rebind UI mirrors existing hotkey card.
+  2. HotkeyEngine — support a second chord, new `LongModeChordEngaged` event into Coordinator.
+  3. Silero VAD plumbing — `ManySpeech.SileroVad` NuGet (MIT, .NET-friendly ONNX wrapper). `VadGate` processes 30 ms frames from the live audio stream, emits `SpeechStart`/`SpeechEnd` after a configurable hangover.
+  4. AppCoordinator streaming branch — new FSM transitions: `Idle + LongModeToggle → Streaming → chunk-on-VAD loop`. Serialized paste queue so chunk N+1 can't beat chunk N to the foreground.
+  5. Whisper warm-pool — keep one `whisper.exe` per session alive, pipe wav-per-chunk over stdin (or via a temp-file watch). Claws back ~150 ms spawn lag per chunk.
+  6. Pill UI variant — "STREAMING · CTRL+SHIFT+WIN TO STOP" label, brighter accent + slower breath so the user sees state.
+  7. Hallucination filter — min chunk 1.0 s, VAD-confidence integral floor, phrase blacklist for known whisper artifacts ("Thanks for watching", "Subtitles by …"), `--no-context --temperature 0` flags, foreground-HWND sanity check before paste (queue if it changed mid-utterance).
+  8. Manual milestone test — author walks long-form dictation scenarios (article writing, Slack thread, code comment block); iterate on hallucination filter + boundary handling based on what surfaces.
+- **Top 3 risks:**
+  1. Whisper hallucinations on near-silent chunks land in the user's doc — high-visibility ("Thanks for watching" pasted into Slack). Mitigated in cluster 7 but never fully eliminated.
+  2. Mid-word VAD cuts on breath pauses ("trans-action"). Mitigated with 200 ms padding + `--prompt` previous-tail; expect one visible glitch per long session anyway.
+  3. Paste-into-wrong-app when user alt-tabs mid-utterance. Mitigated by foreground-HWND check at chunk-emit time.
+- **Realistic latency:** ~0.7–1.0 s perceived after each pause with tiny.en on a modern CPU. Not instant; comparable to Wispr Flow push-to-talk responsiveness.
+- **Trigger for promotion:** Author finishes dogfood pass on v1.0 push-to-talk AND still wants this OR ≥ 2 testers ask for "let me keep talking" UX.
+- **Alternative considered + rejected (for now):** "Option A" soft-cap auto-flush (paste at 30 s OR first long pause after 10 s while keeping toggle-recording UX). Simpler, lower risk; rejected because dogfood feedback specifically asked for the speak-pause-paste loop, not a long-recording survival aid. If R1.2-10 proves too costly during implementation, fall back to this.
+- **Cost estimate:** ~2 weeks build + 1 week dogfood + bug-tail.
+
 ---
 
 ## v1.3 — "ARM64 + GPU diversity"
@@ -159,9 +182,10 @@ Themes: things that don't fix bugs but build trust and reduce friction for a wid
 - **What:** Reserved keywords that trigger app actions ("new line", "clear", "undo"). Local pattern match before whisper.
 - **Why long-term:** Crosses from "dictation tool" into "voice assistant" — different product.
 
-### LT-07 — Streaming transcription (partial results)
-- **What:** Show transcript text appearing in real-time while user holds the chord, using whisper.cpp streaming mode.
-- **Why long-term:** UX improvement; significant rework of the WhisperRunner; loss of the current "transcribe-on-release" simplicity.
+### LT-07 — Streaming partial-results UI (separate from R1.2-10)
+- **What:** Show transcript text appearing in real-time *while user holds the chord*, using whisper.cpp's sliding-window `examples/stream/stream.cpp` mode (`--step/--length/--keep`). Text mutates as the model revises — useful as a live caption overlay, NOT for paste-into-app.
+- **Why long-term:** Different architecture from R1.2-10 (sliding-window vs chunk-on-VAD). Distinct UX value (visible live feedback in the pill) but emits unstable text — you can't un-paste a token whisper later revises. So this is a viewer feature, not a paste pipeline.
+- **Why deferred indefinitely:** R1.2-10 covers the "continuous paste" use case via chunk-on-VAD. Sliding-window is only valuable if you want the *visible-text-mutating-in-pill* affordance, which is a separate UX hypothesis worth testing only after R1.2-10 ships and we see whether testers want more.
 
 ### LT-08 — LLM post-processing (opt-in)
 - **What:** After transcription, optionally pipe text through a local LLM (Ollama / llama.cpp) for cleanup: filler-word removal, punctuation fix, capitalization.

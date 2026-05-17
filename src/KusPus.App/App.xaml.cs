@@ -31,6 +31,8 @@ public partial class App : System.Windows.Application
     private AppCoordinator? _coordinator;
     private TrayManager? _tray;
     private FloatingPillWindow? _pill;
+    private MainWindow? _mainWindow;
+    private CrashReporter? _crashReporter;
     private Microsoft.Extensions.Logging.ILogger? _log;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -76,14 +78,98 @@ public partial class App : System.Windows.Application
         _log = _services.GetRequiredService<ILoggerFactory>().CreateLogger("KusPus.App");
         _log.LogInformation("KusPus starting up. Logs at {Path}.", AppPaths.LogsDir);
 
+        // Theme brushes installed before any window is constructed so XAML can
+        // resolve {DynamicResource AppBg} etc. at MainWindow.InitializeComponent.
+        // Apply also handles subsequent replacements when the user flips the theme.
+        var initialMode = ThemeApply.Resolve(_services.GetRequiredService<IPrefsStore>().Current.Ui.Theme);
+        ThemeTokens.Apply(Resources, initialMode);
+
+        // Crash reporter — listens to Privacy toggles via PrefsStore.Changes and
+        // initialises / tears down Sentry accordingly. Started before the coordinator
+        // so a startup failure in any later wire-up still ships a scrubbed report
+        // when the user has opted in.
+        _crashReporter = _services.GetRequiredService<CrashReporter>();
+        _crashReporter.Start();
+
         _coordinator = _services.GetRequiredService<AppCoordinator>();
         _pill = new FloatingPillWindow();
         _pill.SetLogger(_services.GetRequiredService<ILoggerFactory>().CreateLogger<FloatingPillWindow>());
+        _pill.SetCloseAction(Shutdown);
         _pill.Bind(_coordinator.State);
+        _pill.BindLevels(_services.GetRequiredService<IAudioRecorder>().Levels);
 
-        _tray = new TrayManager(_coordinator, Shutdown);
+        // MainWindow is created at startup but stays hidden until the user opens it
+        // via the tray "Preferences…" item. Hides on close — only the tray's Quit
+        // fully exits (APP_DESIGN §3.1 / §8.5).
+        _mainWindow = new MainWindow(
+            _services.GetRequiredService<IPrefsStore>(),
+            _services.GetRequiredService<IHotkeyEngine>(),
+            _services.GetRequiredService<IModelManager>(),
+            _services.GetRequiredService<IHistoryStore>(),
+            _coordinator,
+            _services.GetRequiredService<IAudioRecorder>(),
+            _services.GetRequiredService<IWhisperRunner>(),
+            _services.GetService<ILogger<MainWindow>>());
+
+        // Pill's hover-extended Settings button opens Preferences too (audit follow-
+        // up). Wired here, not above, because _mainWindow has to exist first.
+        _pill.SetSettingsAction(() => _mainWindow.ShowOn("general"));
+
+        // Dock record button = tap-mode toggle. Per user spec the toggle does
+        // not auto-grab a foreground target — the post-transcribe paste lands
+        // wherever focus is at the time. Coordinator.ToggleFromTray is the
+        // existing entry point for the FSM's ToggleFromTray event.
+        _pill.SetRecordToggleAction(_coordinator.ToggleFromTray);
+
+        // Push the user's preferred input device id into the AudioRecorder on
+        // startup AND on every settings change. Composition-root owns this
+        // because AudioRecorder doesn't take a Persistence dependency.
+        var prefsStore = _services.GetRequiredService<IPrefsStore>();
+        var audioRecorder = _services.GetRequiredService<IAudioRecorder>();
+        audioRecorder.SetInputDeviceId(prefsStore.Current.Audio.InputDeviceId);
+        prefsStore.Changes.Subscribe(s => audioRecorder.SetInputDeviceId(s.Audio.InputDeviceId));
+
+        // Pill's dock mic-chooser needs to read the device list + write the
+        // selection without taking a Persistence dependency. Two tiny adapter
+        // bridges close the loop. PrefsStore lives in this method's scope so
+        // the bridge captures it.
+        _pill.SetBridges(
+            prefs: new PrefsStoreBridge(prefsStore),
+            audio: new AudioDeviceBridge());
+
+        // Personality animations gate: user opt-out OR Windows accessibility
+        // "Show animations" setting off. Recomputed on every settings change.
+        UpdatePillReduceAnimations(prefsStore.Current);
+        prefsStore.Changes.Subscribe(s => Dispatcher.BeginInvoke(() => UpdatePillReduceAnimations(s)));
+
+        _tray = new TrayManager(
+            prefsStore,
+            _coordinator,
+            onToggleRecorder: _coordinator.ToggleFromTray,
+            onOpenTab: tab => _mainWindow.ShowOn(tab),
+            onQuit: Shutdown);
 
         _coordinator.Start();
+
+        // First-launch onboarding. Queued with Background priority so OnStartup
+        // returns first and the message loop is fully running before the modal's
+        // nested dispatcher frame begins. Skip-on-skip semantics: Onboarding.Completed
+        // stays false until the user actually Finishes, so closing the modal early
+        // brings it back on the next launch (re-runnable via About → "Run again").
+        if (!_services.GetRequiredService<IPrefsStore>().Current.Onboarding.Completed)
+        {
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+            {
+                var window = new OnboardingWindow(
+                    _services.GetRequiredService<IPrefsStore>(),
+                    _services.GetRequiredService<IHotkeyEngine>(),
+                    _services.GetRequiredService<IAudioRecorder>(),
+                    _services.GetRequiredService<IWhisperRunner>(),
+                    _services.GetRequiredService<IModelManager>(),
+                    _services.GetService<ILogger<OnboardingWindow>>());
+                window.ShowDialog();
+            }));
+        }
     }
 
     private static void ConfigureServices(IServiceCollection services)
@@ -98,8 +184,20 @@ public partial class App : System.Windows.Application
                 AppPaths.HistoryDbPath,
                 sp.GetService<ILogger<HistoryStore>>()));
 
-        // Networking — Phase 11 will wrap the HttpClient with the egress-allowlist handler.
-        services.AddSingleton(_ => new HttpClient());
+        // Networking — every outbound request goes through EgressAllowlistHandler so
+        // Offline Mode ON / non-allowlisted host produces a blocked HttpRequestException
+        // instead of hitting the network. See PRD §10.2 + TECH_SPEC §19. HttpClient owns
+        // the handler chain; ServiceProvider disposal at OnExit disposes the singleton.
+        services.AddSingleton(sp =>
+        {
+            var handler = new EgressAllowlistHandler(
+                sp.GetRequiredService<IPrefsStore>(),
+                sp.GetService<ILogger<EgressAllowlistHandler>>())
+            {
+                InnerHandler = new SocketsHttpHandler(),
+            };
+            return new HttpClient(handler);
+        });
 
         // Whisper
         services.AddSingleton<IModelManager>(sp =>
@@ -129,6 +227,13 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IHotkeyEngine>(sp =>
             new HotkeyEngine(sp.GetService<ILogger<HotkeyEngine>>()));
 
+        // Crash reporter (Phase 11) — opt-in Sentry, gated on (CrashReportsOptIn && !OfflineMode).
+        // Takes the ILoggerFactory (not just ILogger<CrashReporter>) so it can build
+        // a logger for the EgressAllowlistHandler it constructs for Sentry's transport.
+        services.AddSingleton(sp => new CrashReporter(
+            sp.GetRequiredService<IPrefsStore>(),
+            sp.GetService<ILoggerFactory>()));
+
         // Coordinator
         services.AddSingleton(sp => new AppCoordinator(
             sp.GetRequiredService<IHotkeyEngine>(),
@@ -142,29 +247,101 @@ public partial class App : System.Windows.Application
             sp.GetService<ILogger<AppCoordinator>>()));
     }
 
+    private void UpdatePillReduceAnimations(KusPus.Core.Settings.AppSettings s)
+    {
+        // Combine the user toggle with Windows' "Show animations" accessibility
+        // setting — if either says "reduce", we reduce. SystemParameters.ClientAreaAnimation
+        // is true when Windows wants animations enabled.
+        bool reduce = s.Privacy.ReducePillAnimations || !SystemParameters.ClientAreaAnimation;
+        _pill?.SetReduceAnimations(reduce);
+    }
+
+    // ── Pill bridges ───────────────────────────────────────────────────────
+    // The pill window needs read/write access to PrefsStore.Audio.InputDeviceId
+    // and an enumeration of capture devices. Rather than make the pill depend
+    // on KusPus.Persistence + NAudio, the App-layer composition root wires
+    // these tiny adapter bridges. The pill defines the interfaces; App
+    // implements them. Same pattern as IClipboardWriter in KusPus.Native.
+
+    private sealed class PrefsStoreBridge : FloatingPillWindow.IPrefsStoreBridge
+    {
+        private readonly IPrefsStore _prefs;
+        public PrefsStoreBridge(IPrefsStore prefs) => _prefs = prefs;
+        public string? CurrentInputDeviceId => _prefs.Current.Audio.InputDeviceId;
+        public Task SetInputDeviceIdAsync(string? id)
+        {
+            var current = _prefs.Current;
+            if (current.Audio.InputDeviceId == id)
+            {
+                return Task.CompletedTask;
+            }
+            var next = current with { Audio = current.Audio with { InputDeviceId = id } };
+            return _prefs.SaveAsync(next);
+        }
+    }
+
+    private sealed class AudioDeviceBridge : FloatingPillWindow.IAudioRecorderBridge
+    {
+        public IReadOnlyList<(string Id, string Name)> EnumerateInputDevices()
+        {
+            var result = new List<(string Id, string Name)>();
+            try
+            {
+                using var enumerator = new NAudio.CoreAudioApi.MMDeviceEnumerator();
+                var devices = enumerator.EnumerateAudioEndPoints(
+                    NAudio.CoreAudioApi.DataFlow.Capture,
+                    NAudio.CoreAudioApi.DeviceState.Active);
+                foreach (var d in devices)
+                {
+                    result.Add((d.ID, d.FriendlyName ?? "(unknown device)"));
+                    d.Dispose();
+                }
+            }
+            catch (System.Runtime.InteropServices.COMException)
+            {
+                // No mics / driver issue — return empty list, pill shows just
+                // "Default device" in the chooser.
+            }
+            return result;
+        }
+    }
+
     protected override void OnExit(ExitEventArgs e)
     {
         _log?.LogInformation("KusPus shutting down.");
+        _crashReporter?.Dispose();
         _coordinator?.Dispose();
         _tray?.Dispose();
         _pill?.Close();
+        // MainWindow's normal Close behaviour is to hide (per §3.1/§8.5). At app
+        // shutdown we want a real close — ForceClose flips the internal flag.
+        _mainWindow?.ForceClose();
         (_services as IDisposable)?.Dispose();
         _instanceGuard?.Dispose();
         Log.CloseAndFlush();
         base.OnExit(e);
     }
 
+    // Unhandled-exception handlers per TECH_SPEC §10.4. Each one (a) writes a
+    // Serilog record for the local %LOCALAPPDATA%\KusPus\logs file, then
+    // (b) forwards to Sentry IF the user has opted in — gated on
+    // _crashReporter?.IsActive so we don't call into a Sentry SDK that's been
+    // torn down by a privacy-toggle flip.
+
     private void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
     {
-        if (e.ExceptionObject is Exception ex)
+        if (e.ExceptionObject is not Exception ex)
         {
-            _log?.LogCritical(ex, "Unhandled AppDomain exception.");
+            return;
         }
+        _log?.LogCritical(ex, "Unhandled AppDomain exception.");
+        TryReportToSentry(ex);
     }
 
     private void OnDispatcherUnhandled(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         _log?.LogCritical(e.Exception, "Unhandled dispatcher exception.");
+        TryReportToSentry(e.Exception);
         // Don't crash the app on a UI-thread exception in v1; log and swallow.
         e.Handled = true;
     }
@@ -172,6 +349,25 @@ public partial class App : System.Windows.Application
     private void OnUnobservedTask(object? sender, UnobservedTaskExceptionEventArgs e)
     {
         _log?.LogWarning(e.Exception, "Unobserved task exception.");
+        TryReportToSentry(e.Exception);
         e.SetObserved();
+    }
+
+    private void TryReportToSentry(Exception ex)
+    {
+        if (_crashReporter?.IsActive != true)
+        {
+            return;
+        }
+        try
+        {
+            Sentry.SentrySdk.CaptureException(ex);
+        }
+        catch (Exception sentryEx)
+        {
+            // Never let a Sentry failure escalate into a recursive unhandled
+            // exception — log and move on.
+            _log?.LogWarning(sentryEx, "Sentry CaptureException failed.");
+        }
     }
 }

@@ -1,0 +1,700 @@
+<Window x:Class="KusPus.App.OnboardingWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:svgc="http://sharpvectors.codeplex.com/svgc/"
+        Title="KusPus — Setup"
+        Icon="/icon.ico"
+        Width="720" Height="520"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None"
+        AllowsTransparency="False"
+        Background="{DynamicResource AppBg}"
+        ShowInTaskbar="False"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display">
+    <!--
+        Onboarding modal per docs/APP_DESIGN.md §4. Chromeless rounded card so the
+        12 px corner radius reads cleanly. Backdrop dimming deferred — the window
+        appears centered and topmost, which is enough until the §4.1 dimmed-desktop
+        polish in a later cluster.
+    -->
+    <!-- Corner radius pulled from design-system token Radius.Lg (= 8) so it
+         matches the OS-rounded outer window edge produced by DwmSetWindowAttribute
+         in OnSourceInitialized. The Win11 DWM API only supports two values for
+         DWMWA_WINDOW_CORNER_PREFERENCE — DWMWCP_ROUND (~8 px) or
+         DWMWCP_ROUNDSMALL (~4 px) — so the spec's original 12 px would create
+         a visible mismatch between the inner Border curve and the OS-clipped
+         window edge. 8 px is the aligned choice. -->
+    <Border x:Name="Root"
+            CornerRadius="{StaticResource Radius.Lg}"
+            Background="{DynamicResource AppBg}"
+            BorderBrush="{DynamicResource BorderSubtle}"
+            BorderThickness="1">
+        <Border.Effect>
+            <DropShadowEffect Color="Black" Direction="270"
+                              ShadowDepth="20" BlurRadius="40" Opacity="0.55"/>
+        </Border.Effect>
+
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Progress dots header — draggable so user can move the window. -->
+            <StackPanel x:Name="ProgressDots"
+                        Grid.Row="0"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Center"
+                        Margin="0,24,0,0"
+                        MouseLeftButtonDown="OnHeaderMouseDown"
+                        Background="Transparent"/>
+
+            <!-- Step content — all 7 stacked; one visible. -->
+            <Grid Grid.Row="1" Margin="40,28,40,0">
+                <!-- ── Step 1 · Welcome ─────────────────────────────────────── -->
+                <Grid x:Name="Step1Welcome">
+                    <StackPanel>
+                        <TextBlock Text="STEP 1 OF 7"
+                                   FontFamily="Segoe UI Variable Text, Segoe UI"
+                                   FontSize="10.5"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource Mint}"/>
+                        <TextBlock Text="Welcome to KusPus"
+                                   FontFamily="Segoe UI Variable Display, Segoe UI"
+                                   FontSize="22"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource PrimaryText}"
+                                   Margin="0,6,0,8"/>
+                        <TextBlock Text="A quiet, local-first way to turn your voice into text — anywhere on Windows."
+                                   FontFamily="Segoe UI Variable Text, Segoe UI"
+                                   FontSize="13"
+                                   Foreground="{DynamicResource SecondaryText}"
+                                   MaxWidth="540"
+                                   HorizontalAlignment="Left"
+                                   TextWrapping="Wrap"
+                                   Margin="0,0,0,24"/>
+
+                        <!-- Stylized desktop preview with the SVG mark centered. -->
+                        <Border CornerRadius="10"
+                                Background="{DynamicResource Surface}"
+                                BorderBrush="{DynamicResource BorderSubtle}"
+                                BorderThickness="1"
+                                Padding="28,32"
+                                Margin="0,0,0,18">
+                            <StackPanel HorizontalAlignment="Center">
+                                <svgc:SvgViewbox Source="pack://application:,,,/icon.svg"
+                                                 Height="56" Width="56"/>
+                                <TextBlock Text="KusPus"
+                                           FontFamily="Segoe UI Variable Display, Segoe UI"
+                                           FontSize="14"
+                                           FontWeight="SemiBold"
+                                           Foreground="{DynamicResource PrimaryText}"
+                                           HorizontalAlignment="Center"
+                                           Margin="0,8,0,0"/>
+                            </StackPanel>
+                        </Border>
+
+                        <UniformGrid Columns="3" Rows="1">
+                            <Border Style="{DynamicResource OnboardingValueCard}">
+                                <StackPanel>
+                                    <TextBlock Text="Hotkey-driven" Style="{DynamicResource OnboardingValueLabel}"/>
+                                    <TextBlock Text="Hold a chord, dictate, release. Paste lands wherever you were typing." Style="{DynamicResource OnboardingValueDetail}"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{DynamicResource OnboardingValueCard}" Margin="10,0">
+                                <StackPanel>
+                                    <TextBlock Text="Local-first" Style="{DynamicResource OnboardingValueLabel}"/>
+                                    <TextBlock Text="Transcription runs on this machine. No cloud, no accounts, no telemetry." Style="{DynamicResource OnboardingValueDetail}"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{DynamicResource OnboardingValueCard}">
+                                <StackPanel>
+                                    <TextBlock Text="Invisible" Style="{DynamicResource OnboardingValueLabel}"/>
+                                    <TextBlock Text="A small pill near the taskbar shows recording state. That's it." Style="{DynamicResource OnboardingValueDetail}"/>
+                                </StackPanel>
+                            </Border>
+                        </UniformGrid>
+                    </StackPanel>
+                </Grid>
+
+                <!-- ── Step 2 · Hotkey picker ───────────────────────────────── -->
+                <Grid x:Name="Step2Hotkey" Visibility="Collapsed">
+                    <StackPanel>
+                        <TextBlock Text="STEP 2 OF 7"
+                                   FontFamily="Segoe UI Variable Text, Segoe UI"
+                                   FontSize="10.5"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource Mint}"/>
+                        <TextBlock Text="Pick your hotkey"
+                                   FontFamily="Segoe UI Variable Display, Segoe UI"
+                                   FontSize="22"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource PrimaryText}"
+                                   Margin="0,6,0,8"/>
+                        <TextBlock Text="Hold this chord anywhere in Windows to start dictation. Release to stop and paste."
+                                   FontFamily="Segoe UI Variable Text, Segoe UI"
+                                   FontSize="13"
+                                   Foreground="{DynamicResource SecondaryText}"
+                                   MaxWidth="540"
+                                   TextWrapping="Wrap"
+                                   Margin="0,0,0,28"/>
+
+                        <Grid HorizontalAlignment="Center" Width="440">
+                            <Border x:Name="OnboardingHotkeyCard"
+                                    CornerRadius="10"
+                                    Background="{DynamicResource Surface}"
+                                    BorderBrush="{DynamicResource BorderSubtle}"
+                                    BorderThickness="1"
+                                    Padding="24,22"
+                                    Cursor="Hand"
+                                    MouseLeftButtonDown="OnHotkeyCardClick">
+                                <StackPanel>
+                                    <TextBlock x:Name="OnbHotkeyEyebrow"
+                                               Text="HOTKEY"
+                                               FontFamily="Segoe UI Variable Text, Segoe UI"
+                                               FontSize="10.5"
+                                               FontWeight="SemiBold"
+                                               Foreground="{DynamicResource MutedText}"
+                                               Margin="0,0,0,12"/>
+                                    <StackPanel x:Name="OnbHotkeyKeycaps" Orientation="Horizontal"/>
+                                    <TextBlock x:Name="OnbHotkeyHint"
+                                               Text="Tap the picker, then press a new chord."
+                                               FontFamily="Segoe UI Variable Text, Segoe UI"
+                                               FontSize="11.5"
+                                               Foreground="{DynamicResource MutedText}"
+                                               FontStyle="Italic"
+                                               Margin="0,14,0,0"
+                                               TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Border>
+                            <Rectangle x:Name="OnbHotkeyListenBorder"
+                                       Stroke="{DynamicResource Mint}"
+                                       StrokeThickness="1.5"
+                                       StrokeDashArray="4 3"
+                                       RadiusX="10" RadiusY="10"
+                                       Visibility="Collapsed"
+                                       IsHitTestVisible="False"/>
+                        </Grid>
+
+                        <Border x:Name="OnbConflictRow"
+                                HorizontalAlignment="Center"
+                                Width="440"
+                                Background="{DynamicResource WarningTint}"
+                                BorderBrush="{DynamicResource WarningBorder}"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="14,10"
+                                Margin="0,12,0,0"
+                                Visibility="Collapsed">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Width="7" Height="7" Fill="{DynamicResource WarningAmber}" VerticalAlignment="Center"/>
+                                <TextBlock Text="Shortcut conflict."
+                                           FontSize="12" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource WarningAmber}"
+                                           Margin="10,0,8,0" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="OnbConflictText"
+                                           FontSize="12"
+                                           Foreground="{DynamicResource PrimaryText}"
+                                           VerticalAlignment="Center"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+
+                <!-- ── Step 3 · Microphone check ────────────────────────────── -->
+                <Grid x:Name="Step3Mic" Visibility="Collapsed">
+                    <StackPanel>
+                        <TextBlock Text="STEP 3 OF 7"
+                                   FontFamily="Segoe UI Variable Text, Segoe UI"
+                                   FontSize="10.5" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource Mint}"/>
+                        <TextBlock Text="Check your mic"
+                                   FontFamily="Segoe UI Variable Display, Segoe UI"
+                                   FontSize="22" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource PrimaryText}"
+                                   Margin="0,6,0,8"/>
+                        <TextBlock Text="We need permission to listen while you hold the hotkey. Nothing is recorded otherwise. Pick which mic to use — you can change it later in Preferences → Audio."
+                                   FontFamily="Segoe UI Variable Text, Segoe UI"
+                                   FontSize="13"
+                                   Foreground="{DynamicResource SecondaryText}"
+                                   MaxWidth="540" TextWrapping="Wrap"
+                                   Margin="0,0,0,20"/>
+
+                        <!-- Input device chooser — writes to PrefsStore.Audio.InputDeviceId,
+                             the same field Preferences → Audio uses. Selection persists
+                             until user changes it from Preferences. The live meter card
+                             below re-binds to whichever device is picked. -->
+                        <StackPanel HorizontalAlignment="Center" Width="440" Margin="0,0,0,16">
+                            <TextBlock Text="INPUT DEVICE"
+                                       FontFamily="Segoe UI Variable Text, Segoe UI"
+                                       FontSize="10.5"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource MutedText}"
+                                       Margin="0,0,0,8"/>
+                            <ComboBox x:Name="OnbInputDeviceCombo"
+                                      Style="{StaticResource ComboBox.Surface}"
+                                      SelectionChanged="OnOnbInputDeviceChanged"/>
+                        </StackPanel>
+
+                        <Border x:Name="MicCard"
+                                HorizontalAlignment="Center"
+                                Width="440"
+                                CornerRadius="10"
+                                Background="{DynamicResource Surface}"
+                                BorderBrush="{DynamicResource BorderSubtle}"
+                                BorderThickness="1"
+                                Padding="24,22">
+                            <StackPanel>
+                                <TextBlock x:Name="MicDeviceLabel"
+                                           Text="DEVICE"
+                                           FontFamily="Segoe UI Variable Text, Segoe UI"
+                                           FontSize="10.5"
+                                           FontWeight="SemiBold"
+                                           Foreground="{DynamicResource MutedText}"
+                                           Margin="0,0,0,12"/>
+
+                                <!-- Discord-style meter, same as Audio tab. -->
+                                <Grid Height="14" Margin="0,0,0,16">
+                                    <Border Height="6" VerticalAlignment="Center"
+                                            CornerRadius="3"
+                                            Background="{DynamicResource MeterTrack}"/>
+                                    <Border x:Name="MicMeterFill"
+                                            Height="6" Width="0"
+                                            VerticalAlignment="Center"
+                                            HorizontalAlignment="Left"
+                                            CornerRadius="3"
+                                            Background="{DynamicResource Mint}"/>
+                                </Grid>
+
+                                <StackPanel x:Name="MicSuccessRow" Orientation="Horizontal">
+                                    <Ellipse Width="7" Height="7" Fill="{DynamicResource Mint}" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Receiving audio"
+                                               FontFamily="Segoe UI Variable Text, Segoe UI"
+                                               FontSize="12"
+                                               FontWeight="Medium"
+                                               Foreground="{DynamicResource Mint}"
+                                               VerticalAlignment="Center"
+                                               Margin="10,0,0,0"/>
+                                </StackPanel>
+
+                                <StackPanel x:Name="MicErrorRow" Orientation="Horizontal" Visibility="Collapsed">
+                                    <Ellipse Width="7" Height="7" Fill="{DynamicResource ErrorRed}" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Microphone blocked"
+                                               FontFamily="Segoe UI Variable Text, Segoe UI"
+                                               FontSize="12"
+                                               FontWeight="Medium"
+                                               Foreground="{DynamicResource ErrorRed}"
+                                               VerticalAlignment="Center"
+                                               Margin="10,0,0,0"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Button x:Name="MicOpenSettings"
+                                Content="Open Settings"
+                                Click="OnOpenMicSettingsClick"
+                                Padding="14,7"
+                                Background="{DynamicResource Mint}"
+                                Foreground="#0F1F18"
+                                FontWeight="SemiBold"
+                                BorderThickness="0"
+                                HorizontalAlignment="Center"
+                                Margin="0,14,0,0"
+                                Visibility="Collapsed"/>
+                    </StackPanel>
+                </Grid>
+
+                <!-- ── Step 4 · Autostart ───────────────────────────────────── -->
+                <Grid x:Name="Step4Autostart" Visibility="Collapsed">
+                    <StackPanel>
+                        <TextBlock Text="STEP 4 OF 7"
+                                   FontFamily="Segoe UI Variable Text, Segoe UI"
+                                   FontSize="10.5" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource Mint}"/>
+                        <TextBlock Text="Start with Windows?"
+                                   FontFamily="Segoe UI Variable Display, Segoe UI"
+                                   FontSize="22" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource PrimaryText}"
+                                   Margin="0,6,0,8"/>
+                        <TextBlock Text="KusPus is most useful when it's already running. You can change this later in Preferences."
+                                   FontFamily="Segoe UI Variable Text, Segoe UI"
+                                   FontSize="13"
+                                   Foreground="{DynamicResource SecondaryText}"
+                                   MaxWidth="540" TextWrapping="Wrap"
+                                   Margin="0,0,0,28"/>
+
+                        <Border x:Name="OnbAutostartCard"
+                                CornerRadius="10"
+                                Background="{DynamicResource Surface}"
+                                BorderBrush="{DynamicResource BorderSubtle}"
+                                BorderThickness="1.5"
+                                Padding="22,20"
+                                Cursor="Hand"
+                                MouseLeftButtonDown="OnAutostartCardClick">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Launch KusPus when I sign in"
+                                               FontFamily="Segoe UI Variable Text, Segoe UI"
+                                               FontSize="14" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource PrimaryText}"/>
+                                    <TextBlock Text="Adds a HKCU\Run entry. Trivially removed from Settings → Apps → Startup if you change your mind."
+                                               FontFamily="Segoe UI Variable Text, Segoe UI"
+                                               FontSize="11.5"
+                                               Foreground="{DynamicResource MutedText}"
+                                               Margin="0,4,0,0"
+                                               TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <CheckBox x:Name="OnbAutostartToggle"
+                                          Grid.Column="1"
+                                          Style="{DynamicResource Toggle}"
+                                          VerticalAlignment="Center"
+                                          Checked="OnAutostartToggleChanged"
+                                          Unchecked="OnAutostartToggleChanged"/>
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+
+                <!-- ── Step 5 · Crash reports ───────────────────────────────── -->
+                <Grid x:Name="Step5Crash" Visibility="Collapsed">
+                    <StackPanel>
+                        <TextBlock Text="STEP 5 OF 7"
+                                   FontFamily="Segoe UI Variable Text, Segoe UI"
+                                   FontSize="10.5" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource Mint}"/>
+                        <TextBlock Text="Help improve KusPus?"
+                                   FontFamily="Segoe UI Variable Display, Segoe UI"
+                                   FontSize="22" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource PrimaryText}"
+                                   Margin="0,6,0,8"/>
+                        <TextBlock Text="Crash reports are anonymous and opt-in. Everything else stays local. Always."
+                                   FontFamily="Segoe UI Variable Text, Segoe UI"
+                                   FontSize="13"
+                                   Foreground="{DynamicResource SecondaryText}"
+                                   MaxWidth="540" TextWrapping="Wrap"
+                                   Margin="0,0,0,24"/>
+
+                        <Border x:Name="OnbCrashCard"
+                                CornerRadius="10"
+                                Background="{DynamicResource Surface}"
+                                BorderBrush="{DynamicResource BorderSubtle}"
+                                BorderThickness="1.5"
+                                Padding="22,20"
+                                Cursor="Hand"
+                                MouseLeftButtonDown="OnCrashCardClick"
+                                Margin="0,0,0,18">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Send opt-in crash reports"
+                                               FontFamily="Segoe UI Variable Text, Segoe UI"
+                                               FontSize="14" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource PrimaryText}"/>
+                                    <TextBlock Text="No transcript text, audio, or clipboard contents are ever sent."
+                                               FontFamily="Segoe UI Variable Text, Segoe UI"
+                                               FontSize="11.5"
+                                               Foreground="{DynamicResource MutedText}"
+                                               Margin="0,4,0,0"
+                                               TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <CheckBox x:Name="OnbCrashToggle"
+                                          Grid.Column="1"
+                                          Style="{DynamicResource Toggle}"
+                                          VerticalAlignment="Center"
+                                          Checked="OnCrashToggleChanged"
+                                          Unchecked="OnCrashToggleChanged"/>
+                            </Grid>
+                        </Border>
+
+                        <Border Background="{DynamicResource MintTint}"
+                                BorderBrush="{DynamicResource MintBorder}"
+                                BorderThickness="1"
+                                CornerRadius="8"
+                                Padding="20,16">
+                            <StackPanel>
+                                <TextBlock Text="Local-first."
+                                           FontFamily="Segoe UI Variable Text, Segoe UI"
+                                           FontSize="13" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource Mint}"/>
+                                <TextBlock Text="Audio capture, transcription, and history all stay on this machine."
+                                           FontFamily="Segoe UI Variable Text, Segoe UI"
+                                           FontSize="12"
+                                           Foreground="{DynamicResource PrimaryText}"
+                                           Margin="0,4,0,0"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+
+                <!-- ── Step 6 · Try it ──────────────────────────────────────── -->
+                <Grid x:Name="Step6TryIt" Visibility="Collapsed">
+                    <StackPanel>
+                        <TextBlock Text="STEP 6 OF 7"
+                                   FontFamily="Segoe UI Variable Text, Segoe UI"
+                                   FontSize="10.5" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource Mint}"/>
+                        <TextBlock Text="Try your first dictation"
+                                   FontFamily="Segoe UI Variable Display, Segoe UI"
+                                   FontSize="22" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource PrimaryText}"
+                                   Margin="0,6,0,8"/>
+                        <TextBlock Text="Click Record below, say one sentence, and KusPus will transcribe it using your active model. Take as long as you like — Record again to stop early, or wait the 5 second timer."
+                                   FontFamily="Segoe UI Variable Text, Segoe UI"
+                                   FontSize="13"
+                                   Foreground="{DynamicResource SecondaryText}"
+                                   MaxWidth="540" TextWrapping="Wrap"
+                                   Margin="0,0,0,24"/>
+
+                        <Border x:Name="TryItSurface"
+                                Height="120"
+                                CornerRadius="8"
+                                Background="{DynamicResource Surface}"
+                                Padding="20,16"
+                                Margin="0,0,0,18">
+                            <Border.BorderBrush>
+                                <SolidColorBrush x:Name="TryItBorderBrush" Color="#22FFFFFF"/>
+                            </Border.BorderBrush>
+                            <Border.BorderThickness>1</Border.BorderThickness>
+                            <Grid>
+                                <TextBlock x:Name="TryItEmpty"
+                                           Text="Your transcript will appear here."
+                                           FontFamily="Segoe UI Variable Text, Segoe UI"
+                                           FontSize="13"
+                                           FontStyle="Italic"
+                                           Foreground="{DynamicResource MutedText}"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock x:Name="TryItContent"
+                                           Text=""
+                                           FontFamily="Segoe UI Variable Text, Segoe UI"
+                                           FontSize="13"
+                                           FontWeight="Medium"
+                                           Foreground="{DynamicResource PrimaryText}"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           TextWrapping="Wrap"
+                                           TextAlignment="Center"
+                                           Visibility="Collapsed"/>
+                            </Grid>
+                        </Border>
+
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Button x:Name="TryItSimulate"
+                                    Content="Record dictation"
+                                    Click="OnTryItSimulateClick"
+                                    Padding="14,7"
+                                    Background="{DynamicResource Mint}"
+                                    Foreground="#0F1F18"
+                                    FontWeight="SemiBold"
+                                    BorderThickness="0"/>
+                            <Button x:Name="TryItClear"
+                                    Content="Clear"
+                                    Click="OnTryItClearClick"
+                                    Padding="14,7"
+                                    Background="{DynamicResource SurfaceElevated}"
+                                    Foreground="{DynamicResource PrimaryText}"
+                                    BorderThickness="0"
+                                    Margin="10,0,0,0"
+                                    Visibility="Collapsed"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Grid>
+
+                <!-- ── Step 7 · Done ────────────────────────────────────────── -->
+                <Grid x:Name="Step7Done" Visibility="Collapsed">
+                    <StackPanel>
+                        <TextBlock Text="STEP 7 OF 7"
+                                   FontFamily="Segoe UI Variable Text, Segoe UI"
+                                   FontSize="10.5" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource Mint}"/>
+                        <TextBlock Text="You're set up"
+                                   FontFamily="Segoe UI Variable Display, Segoe UI"
+                                   FontSize="22" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource PrimaryText}"
+                                   Margin="0,6,0,8"/>
+                        <TextBlock Text="KusPus lives in your system tray. Right-click the icon to change anything."
+                                   FontFamily="Segoe UI Variable Text, Segoe UI"
+                                   FontSize="13"
+                                   Foreground="{DynamicResource SecondaryText}"
+                                   MaxWidth="540" TextWrapping="Wrap"
+                                   Margin="0,0,0,28"/>
+
+                        <!-- TrayDiagram — simplified: corner-of-screen mock with the
+                             real SVG mark highlighted in a mint slot. -->
+                        <Border CornerRadius="10"
+                                Background="{DynamicResource Surface}"
+                                BorderBrush="{DynamicResource BorderSubtle}"
+                                BorderThickness="1"
+                                Padding="0"
+                                Height="220"
+                                ClipToBounds="True">
+                            <Grid>
+                                <!-- Fake desktop background -->
+                                <Border CornerRadius="10">
+                                    <Border.Background>
+                                        <RadialGradientBrush GradientOrigin="0.3,0.3" Center="0.3,0.3" RadiusX="1.2" RadiusY="1.2">
+                                            <GradientStop Color="#264DDBA6" Offset="0"/>
+                                            <GradientStop Color="#00000000" Offset="0.6"/>
+                                        </RadialGradientBrush>
+                                    </Border.Background>
+                                </Border>
+                                <!-- Fake taskbar -->
+                                <Border VerticalAlignment="Bottom" Height="36"
+                                        Background="{DynamicResource Sidebar}"/>
+                                <!-- Fake tray icons row -->
+                                <StackPanel Orientation="Horizontal"
+                                            HorizontalAlignment="Right"
+                                            VerticalAlignment="Bottom"
+                                            Margin="0,0,18,8">
+                                    <Ellipse Width="18" Height="18" Fill="{DynamicResource MutedText}" Margin="0,0,8,0" Opacity="0.4"/>
+                                    <Ellipse Width="18" Height="18" Fill="{DynamicResource MutedText}" Margin="0,0,8,0" Opacity="0.4"/>
+                                    <!-- KusPus tray slot -->
+                                    <Border Width="36" Height="36" CornerRadius="8"
+                                            Background="{DynamicResource MintTint}">
+                                        <svgc:SvgViewbox Source="pack://application:,,,/icon.svg"
+                                                         Height="22" Width="22"
+                                                         HorizontalAlignment="Center"
+                                                         VerticalAlignment="Center"/>
+                                    </Border>
+                                </StackPanel>
+                                <!-- Callout text -->
+                                <StackPanel HorizontalAlignment="Left" VerticalAlignment="Top" Margin="22,18,0,0">
+                                    <TextBlock Text="Your KusPus icon lives here."
+                                               FontFamily="Segoe UI Variable Text, Segoe UI"
+                                               FontSize="13" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource PrimaryText}"/>
+                                    <TextBlock Text="Right-click for the menu."
+                                               FontFamily="Segoe UI Variable Text, Segoe UI"
+                                               FontSize="11.5"
+                                               Foreground="{DynamicResource MutedText}"
+                                               Margin="0,3,0,0"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+
+            <!-- Footer: Skip / Back / Next/Finish + 1px top divider -->
+            <Border Grid.Row="2"
+                    BorderBrush="{DynamicResource BorderSubtle}"
+                    BorderThickness="0,1,0,0"
+                    Padding="28,16">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="SkipButton"
+                            Grid.Column="0"
+                            Content="Skip onboarding"
+                            Click="OnSkipClick"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Foreground="{DynamicResource MutedText}"
+                            Padding="6,4"
+                            Cursor="Hand"/>
+                    <Button x:Name="BackButton"
+                            Grid.Column="2"
+                            Content="Back"
+                            Click="OnBackClick"
+                            Background="Transparent"
+                            BorderThickness="1"
+                            BorderBrush="{DynamicResource BorderSubtle}"
+                            Foreground="{DynamicResource PrimaryText}"
+                            Padding="16,7"
+                            Margin="0,0,10,0"
+                            Visibility="Collapsed"/>
+                    <Button x:Name="NextButton"
+                            Grid.Column="3"
+                            Content="Next"
+                            Click="OnNextClick"
+                            Background="{DynamicResource Mint}"
+                            Foreground="#0F1F18"
+                            FontWeight="SemiBold"
+                            BorderThickness="0"
+                            Padding="20,7"/>
+                </Grid>
+            </Border>
+        </Grid>
+    </Border>
+
+    <Window.Resources>
+        <!-- Onboarding-specific styles -->
+        <Style x:Key="OnboardingValueCard" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource Surface}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="14,12"/>
+        </Style>
+        <Style x:Key="OnboardingValueLabel" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+        </Style>
+        <Style x:Key="OnboardingValueDetail" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Foreground" Value="{DynamicResource MutedText}"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Margin" Value="0,4,0,0"/>
+        </Style>
+        <!-- Reuse MainWindow's Toggle + Keycap styles via dynamic lookup. -->
+        <Style x:Key="Toggle" TargetType="CheckBox">
+            <Setter Property="Width" Value="36"/>
+            <Setter Property="Height" Value="20"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Border x:Name="track"
+                                Background="{DynamicResource SurfaceElevated}"
+                                BorderBrush="{DynamicResource BorderStrong}"
+                                BorderThickness="1"
+                                CornerRadius="10">
+                            <Ellipse x:Name="knob"
+                                     Width="14" Height="14"
+                                     Fill="White"
+                                     HorizontalAlignment="Left"
+                                     VerticalAlignment="Center"
+                                     Margin="3,0,0,0"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="track" Property="Background" Value="{DynamicResource Mint}"/>
+                                <Setter TargetName="track" Property="BorderBrush" Value="{DynamicResource Mint}"/>
+                                <Setter TargetName="knob" Property="HorizontalAlignment" Value="Right"/>
+                                <Setter TargetName="knob" Property="Margin" Value="0,0,3,0"/>
+                                <Setter TargetName="knob" Property="Fill" Value="#0F1F18"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="OnboardingKeycap" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource KeycapBg}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource KeycapBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Padding" Value="14,7"/>
+        </Style>
+    </Window.Resources>
+</Window>

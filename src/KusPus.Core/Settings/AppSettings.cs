@@ -46,8 +46,12 @@ public sealed record ModelSettings
 
 public sealed record UiSettings
 {
-    /// <summary>One of <c>auto</c>, <c>light</c>, <c>dark</c>.</summary>
-    public string Theme { get; init; } = "auto";
+    /// <summary>
+    /// One of <c>auto</c>, <c>light</c>, <c>dark</c>. Default is <c>dark</c>
+    /// per user dogfood feedback (2026-05-17) — the light theme is still in
+    /// beta polish, so new installs land on the polished dark surface.
+    /// </summary>
+    public string Theme { get; init; } = "dark";
 
     public string PillPosition { get; init; } = "bottom-center";
 }
@@ -61,6 +65,14 @@ public sealed record PrivacySettings
 {
     public bool OfflineMode { get; init; }
     public bool CrashReportsOptIn { get; init; }
+    /// <summary>
+    /// Accessibility opt-in: when true, the pill's personality animations
+    /// (breath, halo, hue drift, heartbeat blink) are disabled. The pill's
+    /// state crossfades + dock slide remain active — only the always-on
+    /// "alive" cues are gated. Effective if EITHER this is true OR the
+    /// Windows "Show animations" accessibility setting is off.
+    /// </summary>
+    public bool ReducePillAnimations { get; init; }
 }
 
 public sealed record OnboardingSettings
