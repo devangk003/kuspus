@@ -379,3 +379,125 @@ without the tray.
 - **§6.1 Visibility rule** — pill is still hidden whenever the app is not in one
   of the four active states (`recording`, `transcribing`, `confirmed`, `error`).
   Hover-extend is only reachable while the pill is already shown.
+
+---
+
+## 11. Dogfood-driven evolution (2026-05-17)
+
+This section captures pill-spec divergences that landed during the v1 dogfood
+pass. Source-of-truth comments live next to the code in
+`src/KusPus.App/FloatingPillWindow.xaml{,.cs}`; this section is the spec-side
+companion so future edits don't try to "restore" the original behaviour.
+
+### 11.1 Geometry — current footprint (replaces §10.1 width math)
+
+| State | Width | Height | Rationale |
+|---|---|---|---|
+| Collapsed (resting, not hovered, not pinned) | `200` | `56` | Same as original spec |
+| Expanded (hovered, not pinned) | `320` | `78` | Pill 56 + dock 22 (was: hover-extend `200→280` width, no height growth) |
+| Pinned compact | `200` | `56` | Same as Collapsed — pin disables hover-expand entirely |
+
+The hover-extend column from §10.1 is replaced by a dock drawer that slides
+**down** from below the pill on hover (22 px peek). The previous 200→280
+rightward extension is gone.
+
+### 11.2 Pin = "compact-mode + position-lock" (replaces §10.1 pin semantics)
+
+The Pin button no longer "latches the dock open." New semantics:
+
+- **Click pin while expanded** → contract pill back to 200×56 + slide dock back +
+  pin button stays mint-tinted at angle=0, always visible.
+- **Hover while pinned** → only swap idle content (SVG-wordmark ↔ visualizer);
+  **no resize, no dock**.
+- **Click pin again** → unpin; if still hovered, expand back to hover view.
+- **Drag** → disabled while pinned. `OnPillMouseLeftButtonDown` short-circuits
+  before `DragMove()`. Cursor flips `SizeAll`↔`Arrow` on pin toggle to
+  telegraph the lock.
+- A `CompactRecordButton` (top-**LEFT** corner, 18×18 + Radius=4 matching
+  Pin/Wand) appears only while pinned so the user can still trigger recording
+  without unpinning.
+
+### 11.3 Idle content (extension to §2)
+
+Adds a fifth pill visual: **Idle** (in-spec dev override per CLAUDE.md). When the
+app is not in Recording / Transcribing / Confirmed / Error, the pill stays
+visible showing either:
+
+- **Not hovered**: SVG icon + "KusPus" wordmark (mint `{Mint}` foreground)
+- **Hovered (unpinned)**: visualizer bars + "IDLE · HOLD TO DICTATE" label, with
+  the hover-extend dock visible
+- **Hovered (pinned)**: visualizer bars + label, **no resize, no dock**
+
+This will revert to the spec's "hidden when not in use" once the tray menu's
+Quit item makes the close path discoverable — already in place via
+`TrayMenuWindow`, so reversion is unblocked but not yet scheduled.
+
+### 11.4 Tap-mode record button (Toggle Recording \[BETA\])
+
+The dock and the compact corner each carry a record toggle wired to
+`AppCoordinator.ToggleFromTray`. Both glyphs use the same brush state pattern:
+
+| FSM state | Glyph fill | Shape | Rationale |
+|---|---|---|---|
+| Idle | `MutedText` (grey, theme-aware) | Circle (RadiusX = half side) | "Available — tap to start" |
+| Recording | `#EF5350` (red) | Rounded square (RadiusX = ~1.5) | "Press to stop" |
+
+The labels read **"Toggle Recording \[BETA\]"** (both the dock button's
+tooltip and the tray menu item) — the mint `[BETA]` chip signals dogfood
+expectation that this is freshly-wired tap-mode behaviour.
+
+Per-user-spec, the toggle does **not** auto-capture a foreground HWND. The
+post-transcribe paste lands wherever focus is at the time. A small
+`RecordNudgePopup` ("Click into your text field") appears for **2 s** above
+the record button on click as a brief hint.
+
+### 11.5 Bottom corner-radius behaviour
+
+`PillSurface.CornerRadius` snaps `8` → `(8, 8, 0, 0)` inside `OpenDock()` and
+back to `8` inside `CloseDock()` so the pill + dock read as one continuous
+shape while the drawer is visible. Pinned mode never calls those methods
+(gated by `!_isPinned`), so compact-mode pill keeps its full rounded corners.
+Snap (not animate) because `CornerRadius` isn't a natively animatable
+`DependencyProperty`.
+
+### 11.6 Magic wand placeholder
+
+The §10 "Refine text" button is rendered at `Opacity=0.35` with
+`Cursor=Arrow` and tooltip `"Refine text — coming soon"`. Disabled state is
+visually legible per UX audit Option α. The button is **dormant** — no click
+handler.
+
+### 11.7 Shadow softened (replaces drop-shadow in §3.3)
+
+Pill drop shadow lifted from `ShadowDepth=2 BlurRadius=32 Opacity=0.45` →
+`ShadowDepth=0 BlurRadius=14 Opacity=0.25`. Omnidirectional soft halo —
+no directional bleed onto the dock when the drawer is open.
+
+### 11.8 Inner highlight removed
+
+The 1 px `PillInnerHighlight` Rectangle at the pill's top inner edge was
+removed — it only existed on the pill (not the dock), so it created a visible
+seam at the pill/dock junction when the drawer opened.
+
+### 11.9 Personality animations (3-phase Organic Pill redesign)
+
+Pill carries two long-lived `Storyboards` started in `Loaded`:
+
+- **Breath** — `BreathScale` `ScaleX/Y` sine pulse `1.0 ↔ 1.006` over 4 s
+  (`AutoReverse`, `RepeatBehavior.Forever`). Subtle "alive" cue.
+- **Hue drift** — middle gradient stop of `AccentBrush` cycles mint → seafoam
+  → cyan → back over 14 s. Constant `R=0x4D` so perceived lightness stays
+  constant (manual approximation of OKLCH constant-L/C — WPF has no native
+  OKLCH interpolation).
+
+`SetReduceAnimations(true)` (driven by Privacy → "Reduce pill animations" OR
+Windows accessibility "Show animations" off) stops both storyboards.
+State-transition animations (FadePillIn, dock slide, accent line) keep
+running regardless.
+
+### 11.10 Multi-monitor sticky behaviour
+
+Session-only `Dictionary<deviceName, Point>` keyed by `MONITORINFOEX.szDevice`
+remembers per-monitor drag positions. On `Armed`/`Recording` transitions, the
+pill jumps to the focused window's monitor (at remembered or default
+position). Dictionary cleared every fresh process start per user spec.

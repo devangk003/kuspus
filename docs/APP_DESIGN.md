@@ -1768,6 +1768,82 @@ There is no API path to a custom 12 px radius without dropping into `AllowsTrans
 
 The 12 → 8 deviation is recorded here rather than in `CLAUDE.md` because it's a spec revision, not a code-side deviation.
 
+---
+
+## Dogfood-driven design updates (2026-05-17)
+
+Spec-side companion to the running deviation log in `CLAUDE.md`. The items below are revisions to APP_DESIGN, not deviations awaiting reconciliation. Code is the source of truth; revisit this section when the design language evolves further.
+
+### Default theme
+
+The default theme is now **`dark`** (was: `auto`). Light theme is in beta polish; new installs land on the polished dark surface. Preferences → General → Theme picker shows `Auto · Light [BETA] · Dark`. Tooltip on the Light radio explains the beta state. `DefaultSettings.ForFirstRun().Ui.Theme = "dark"`; `DefaultSettingsTests` asserts the new default with rationale comment.
+
+### Tray right-click menu (replaces §5.2's WinForms ContextMenuStrip)
+
+Tray right-click no longer uses the default `WinForms.ContextMenuStrip`. A custom WPF `TrayMenuWindow` renders a rounded `Surface` card matching `Tray_light.png` / `Tray_dark.png`:
+
+- KusPus header with state-aware subtitle `Version 1.0.0 · {Idle | Recording | Transcribing}`
+- `Toggle Recording [BETA]` row with a hotkey keycap chip on the right (live-bound to `PrefsStore.Hotkey`)
+- `Active model: <name>` row with chevron — clicking opens the Models tab in Preferences
+- `Preferences…` → opens General tab
+- `History…` → opens History tab
+- `Quit` in `ErrorRed`
+
+Shows at cursor on `NotifyIcon.MouseClick(Right)`. Closes on `Deactivated` (focus loss) or any item click. `WS_EX_TOOLWINDOW` hides it from Alt-Tab/taskbar.
+
+### State-aware tray icon
+
+`TrayManager` swaps the tray icon based on `AppCoordinator.State`:
+
+| FSM state | Icon | Source |
+|---|---|---|
+| Idle (or any non-Recording/Transcribing) | `icons/icon-idle.ico` | base mint-bars logo |
+| Recording / Transcribing | `icons/icon-recording.ico` | base + red dot top-right with red glow |
+| Failed PostPaste | `icons/icon-error.ico` | base + red warning triangle top-right |
+
+All three .ico files are generated from per-state SVGs via `tools/IconBuilder`. Treating a failed `PostPaste` snapshot as Error makes the warning glyph visible for the duration of the error hold.
+
+### Pill — see PILL_DESIGN §11
+
+The pill's dogfood divergences (pin = compact-mode + position-lock, compact corner record button, tap-mode toggle, nudge popup, corner-radius behaviour, shadow softening, removed inner highlight, mint idle wordmark) live in `docs/PILL_DESIGN.md §11`. APP_DESIGN §2 still describes the canonical 5-state visual model; PILL_DESIGN §11 extends it with the Idle visual + pin semantics + dock drawer.
+
+### Onboarding step 6 — real dictation
+
+Step 6's "Try it" used to pick a random sentence from a hardcoded `SimulatedSentences` list. It now runs the real `IAudioRecorder` + `IWhisperRunner` pipeline: 5 s countdown → transcribe with active model → render actual transcript (or error if mic/model missing). Surfaces broken-mic / missing-model failures during setup instead of after. `OnboardingWindow` constructor now takes `IAudioRecorder, IWhisperRunner, IModelManager` in addition to `IPrefsStore + IHotkeyEngine`.
+
+### Onboarding step 3 — input device picker
+
+Step 3 ("Check your mic") adds an `OnbInputDeviceCombo` above the live meter. Writes to the same `PrefsStore.Audio.InputDeviceId` field that Preferences → Audio uses, so the selection persists until the user changes it from either surface. `ResolveOnbMicDevice` mirrors `MainWindow.ResolveLevelMeterDevice`. Loads async via `OpenMicStepAsync` so the page paints immediately and the mic init runs on `Task.Run`.
+
+### Onboarding gate — "show once, ever"
+
+`OnSkipClick` now sets `Onboarding.Completed = true` (was: `false`). Onboarding modal opens once per install; closing via either Skip or Finish is honoured the same way. Re-runnable via About → "Run again". Per the new rule, the pill's first `Show()` is deferred until the modal closes (via new `BindPillAndShow()` helper in `App.OnStartup`) so the pill is invisible while the modal is up.
+
+### About tab
+
+- Tagline: `"Press a hotkey. Speak. Get pasted."` → **`"Local · Privacy First"`** (matches the `·` rhythm of the legal line above it).
+- Four social icons (LinkedIn, X, GitHub, Portfolio-globe) all wrapped in fixed 24×24 `Canvas` containers so the `Viewbox` measures against guaranteed identical bounds. Path-bbox quirks (GitHub's `M12 .297` y-offset, X's `0.258` left edge, Bezier control points) no longer affect rendered size. Globe geometry expanded from `(2,2) W=20 H=20` → `(1,1) W=22 H=22` so its visible ink fills the box.
+
+### History search bar — mint accent
+
+UX Pro Max two-layer brand accent:
+
+| Layer | Change |
+|---|---|
+| Persistent brand cue | Magnifier glyph `Foreground` → `Mint` |
+| Structural prominence | Bottom border `1px BorderSubtle` → `2px Mint` (element doubles as accent + divider above table header) |
+
+No background fill — that would compete with row data below. Matches the Material 3 / iOS HIG search-bar-with-brand-accent pattern.
+
+### Icon-size design tokens
+
+`Styles/Tokens.xaml` gained two new double tokens for unified glyph sizing:
+
+- `Icon.Glyph` = `11` (action icons in pill chrome, tray menu, dock buttons)
+- `Icon.Chevron` = `9` (small directional indicators — `▾`, `▸`)
+
+Bound via `{StaticResource Icon.Glyph}` / `{StaticResource Icon.Chevron}`. Replaces literal `FontSize="10/11/8"` previously scattered across glyphs.
+
 
 
 
