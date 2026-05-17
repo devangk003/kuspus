@@ -996,7 +996,9 @@ public partial class MainWindow : Window
         var border = new Border
         {
             Style = (Style)FindResource("RowCard"),
-            Margin = new Thickness(0, 0, 0, isLast ? 0 : 1),
+            // 8 px gap reads as individual cards (user audit feedback —
+            // grouped 1 px stacking felt cramped on a list of 5+ models).
+            Margin = new Thickness(0, 0, 0, isLast ? 0 : 8),
         };
         border.Child = grid;
         return border;
@@ -1834,20 +1836,45 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnOpenGitHubClick(object sender, RoutedEventArgs e)
+    private void OnOpenGitHubClick(object sender, RoutedEventArgs e) =>
+        OpenUrl("https://github.com/devangk003/kuspus");
+
+    // ── About-footer social links (audit follow-up). ──────────────────────────
+    private void OnOpenLinkedInClick(object sender, RoutedEventArgs e) =>
+        OpenUrl("https://www.linkedin.com/in/devangk003/");
+
+    private void OnOpenXClick(object sender, RoutedEventArgs e) =>
+        OpenUrl("https://x.com/devang_kumawat");
+
+    private void OnOpenAuthorGitHubClick(object sender, RoutedEventArgs e) =>
+        OpenUrl("https://github.com/devangk003");
+
+    private void OnOpenPortfolioClick(object sender, RoutedEventArgs e) =>
+        OpenUrl("https://lnk.bio/devangk003");
+
+    // Single URL-launcher used by every social/footer link. UseShellExecute=true
+    // hands off to the OS default browser; catches the typical Process.Start
+    // failure modes without crashing the app.
+    private void OpenUrl(string url)
     {
         try
         {
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
             {
-                FileName = "https://github.com/devangk003/kuspus",
+                FileName = url,
                 UseShellExecute = true,
             });
         }
         catch (System.ComponentModel.Win32Exception ex)
         {
 #pragma warning disable CA1848, CA1873
-            _logger.LogWarning(ex, "Failed to open GitHub URL.");
+            _logger.LogWarning(ex, "Failed to open URL {Url}.", url);
+#pragma warning restore CA1848, CA1873
+        }
+        catch (System.IO.FileNotFoundException ex)
+        {
+#pragma warning disable CA1848, CA1873
+            _logger.LogWarning(ex, "No default handler for URL {Url}.", url);
 #pragma warning restore CA1848, CA1873
         }
     }
