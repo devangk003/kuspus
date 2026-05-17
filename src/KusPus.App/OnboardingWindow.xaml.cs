@@ -154,13 +154,12 @@ public partial class OnboardingWindow : Window
         UpdateProgressDots();
 
         // Mic check only runs while step 3 is showing — same on/off pattern as
-        // the MainWindow Audio tab. Populate the device combo FIRST so the
-        // closed-state Text + selection match the persisted device id before
-        // the capture session opens.
+        // the MainWindow Audio tab. The two heavy steps (MMDevice enum +
+        // WasapiCapture init) run on Task.Run so the step renders immediately
+        // and the mic loads in gracefully — mirrors MainWindow.OpenAudioTabAsync.
         if (index == 2)
         {
-            PopulateOnbInputDeviceCombo();
-            StartMicCheck();
+            _ = OpenMicStepAsync();
         }
         else
         {
@@ -191,7 +190,12 @@ public partial class OnboardingWindow : Window
 
     private void OnSkipClick(object sender, RoutedEventArgs e)
     {
-        FinishOnboarding(completed: false);
+        // Skip = Completed=true per user dogfood feedback (2026-05-17).
+        // Previously Skip kept Completed=false so the modal re-appeared every
+        // launch until the user clicked Finish — that turned out to be hostile
+        // (the user just wants to dismiss). Show-once-ever is the new rule;
+        // re-opening is available via About → "Run again".
+        FinishOnboarding(completed: true);
     }
 
     private async void FinishOnboarding(bool completed)
@@ -585,48 +589,85 @@ public partial class OnboardingWindow : Window
 
     // ── Step 3 · Microphone check ──────────────────────────────────────────
 
-    private void StartMicCheck()
+    // Sync façade — kept so the device-change path (OnOnbInputDeviceChanged)
+    // and the existing call sites read the same. Fire-and-forget into the
+    // async variant; WasapiCapture init runs on Task.Run.
+    private void StartMicCheck() => _ = StartMicCheckAsync();
+
+    private async System.Threading.Tasks.Task StartMicCheckAsync()
     {
-        if (_micCapture is not null)
+        // Defensive reset rather than early-return: rapid step toggles can
+        // leave a stale capture around. StopMicCheck is idempotent.
+        StopMicCheck();
+        var savedId = _prefs.Current.Audio.InputDeviceId;
+        // MMDevice resolve + WasapiCapture ctor + driver shared-mode negotiation
+        // can take 150-500 ms on some hardware; do it off-thread so the
+        // onboarding step renders immediately.
+        var setup = await System.Threading.Tasks.Task.Run(() =>
         {
-            return;
-        }
-        try
-        {
-            _mmEnumerator ??= new NAudio.CoreAudioApi.MMDeviceEnumerator();
-            // Use the user's saved device (mirrors MainWindow.ResolveLevelMeterDevice)
-            // so the onboarding meter reflects whichever mic Preferences would.
-            var device = ResolveOnbMicDevice(_mmEnumerator, _prefs.Current.Audio.InputDeviceId);
-            MicDeviceLabel.Text = (device.FriendlyName ?? "MICROPHONE").ToUpperInvariant();
+            try
+            {
+                _mmEnumerator ??= new NAudio.CoreAudioApi.MMDeviceEnumerator();
+                var dev = ResolveOnbMicDevice(_mmEnumerator, savedId);
+                // CRITICAL: read FriendlyName HERE, on the Task.Run (MTA) thread
+                // that created the MMDevice. NAudio's MMDevice doesn't support
+                // cross-apartment marshalling — accessing any property from
+                // the dispatcher (STA) after the await throws
+                // InvalidCastException → E_NOINTERFACE on IMMDevice. WasapiCapture
+                // is fine because it caches WaveFormat internally before its
+                // ctor returns. Verified by the 2026-05-17 log capture.
+                var friendly = (dev.FriendlyName ?? "MICROPHONE").ToUpperInvariant();
+                var cap = new NAudio.CoreAudioApi.WasapiCapture(dev);
+                return (FriendlyName: friendly,
+                        Capture: (NAudio.CoreAudioApi.WasapiCapture?)cap,
+                        Exception: (Exception?)null);
+            }
+            // NAudio's WasapiCapture ctor can throw a wider set than just
+            // COMException + MmException — InvalidOperationException on a
+            // busy device, ArgumentException on a malformed format, etc.
+            // Catch any exception so the user sees ShowMicError instead of a
+            // silent stuck-loading state.
+            catch (Exception ex)
+            {
+                return (FriendlyName: string.Empty, Capture: null, Exception: (Exception?)ex);
+            }
+        }).ConfigureAwait(true);
 
-            var capture = new NAudio.CoreAudioApi.WasapiCapture(device);
-            _micIsFloat = capture.WaveFormat.Encoding ==
-                NAudio.Wave.WaveFormatEncoding.IeeeFloat;
-            _micBytesPerSample = capture.WaveFormat.BitsPerSample / 8;
-            capture.DataAvailable += OnMicDataAvailable;
-            capture.StartRecording();
-            _micCapture = capture;
-
-            MicSuccessRow.Visibility = Visibility.Visible;
-            MicErrorRow.Visibility = Visibility.Collapsed;
-            MicOpenSettings.Visibility = Visibility.Collapsed;
-        }
-        catch (COMException ex)
+        if (setup.Capture is null)
         {
 #pragma warning disable CA1848, CA1873
-            _logger.LogWarning(ex, "Mic check device-enumeration failed.");
+            _logger.LogWarning(setup.Exception, "Onboarding mic check init failed.");
 #pragma warning restore CA1848, CA1873
             ShowMicError();
             return;
+        }
+
+        // Back on UI thread — wire callbacks + start. StartRecording itself is
+        // cheap now that the driver negotiation already happened.
+        MicDeviceLabel.Text = setup.FriendlyName;
+        var capture = setup.Capture;
+        _micIsFloat = capture.WaveFormat.Encoding ==
+            NAudio.Wave.WaveFormatEncoding.IeeeFloat;
+        _micBytesPerSample = capture.WaveFormat.BitsPerSample / 8;
+        capture.DataAvailable += OnMicDataAvailable;
+        try
+        {
+            capture.StartRecording();
         }
         catch (NAudio.MmException ex)
         {
 #pragma warning disable CA1848, CA1873
-            _logger.LogWarning(ex, "Mic check capture-init failed.");
+            _logger.LogWarning(ex, "Onboarding mic StartRecording failed after async init.");
 #pragma warning restore CA1848, CA1873
+            capture.Dispose();
             ShowMicError();
             return;
         }
+        _micCapture = capture;
+
+        MicSuccessRow.Visibility = Visibility.Visible;
+        MicErrorRow.Visibility = Visibility.Collapsed;
+        MicOpenSettings.Visibility = Visibility.Collapsed;
 
         if (_micMeterTimer is null)
         {
@@ -1001,7 +1042,48 @@ public partial class OnboardingWindow : Window
 
     private bool _suppressOnbDeviceChange;
 
-    private void PopulateOnbInputDeviceCombo()
+    // Orchestrates step 3's heavy init off the dispatcher: the page renders
+    // immediately, then enumeration + capture init run on Task.Run, then
+    // the UI populates. Mirrors MainWindow.OpenAudioTabAsync.
+    // Wrapped in a top-level try/catch so any unhandled exception lands as a
+    // visible ShowMicError instead of silently leaving the meter stuck on
+    // "LOADING…" (fire-and-forget tasks otherwise route unhandled exceptions
+    // to UnobservedTaskException, which only logs them).
+    private async System.Threading.Tasks.Task OpenMicStepAsync()
+    {
+        // Placeholder text while enumeration is in flight.
+        MicDeviceLabel.Text = "LOADING…";
+        _suppressOnbDeviceChange = true;
+        try
+        {
+            OnbInputDeviceCombo.ItemsSource = new[] { "Loading microphones…" };
+            OnbInputDeviceCombo.SelectedIndex = 0;
+        }
+        finally
+        {
+            _suppressOnbDeviceChange = false;
+        }
+
+        try
+        {
+            var items = await System.Threading.Tasks.Task.Run(EnumerateOnbInputDeviceItems).ConfigureAwait(true);
+            if (_currentStep != 2)
+            {
+                return; // user navigated away mid-enum
+            }
+            ApplyOnbInputDeviceItems(items);
+            await StartMicCheckAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+#pragma warning disable CA1848, CA1873
+            _logger.LogWarning(ex, "Onboarding OpenMicStepAsync failed unexpectedly.");
+#pragma warning restore CA1848, CA1873
+            ShowMicError();
+        }
+    }
+
+    private System.Collections.Generic.List<OnbInputDeviceItem> EnumerateOnbInputDeviceItems()
     {
         var items = new System.Collections.Generic.List<OnbInputDeviceItem>
         {
@@ -1029,7 +1111,11 @@ public partial class OnboardingWindow : Window
             _logger.LogWarning(ex, "Onboarding mic enumeration failed.");
 #pragma warning restore CA1848, CA1873
         }
+        return items;
+    }
 
+    private void ApplyOnbInputDeviceItems(System.Collections.Generic.List<OnbInputDeviceItem> items)
+    {
         _suppressOnbDeviceChange = true;
         try
         {

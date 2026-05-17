@@ -95,8 +95,10 @@ public partial class App : System.Windows.Application
         _pill = new FloatingPillWindow();
         _pill.SetLogger(_services.GetRequiredService<ILoggerFactory>().CreateLogger<FloatingPillWindow>());
         _pill.SetCloseAction(Shutdown);
-        _pill.Bind(_coordinator.State);
-        _pill.BindLevels(_services.GetRequiredService<IAudioRecorder>().Levels);
+        // Bind() / BindLevels() are deferred to BindPillAndShow() below — the
+        // first snapshot of coordinator.State triggers the pill's initial
+        // Show() via FadePillIn, and we want that to land AFTER the onboarding
+        // modal (if any) closes so the pill isn't visible underneath the modal.
 
         // MainWindow is created at startup but stays hidden until the user opens it
         // via the tray "Preferences…" item. Hides on close — only the tray's Quit
@@ -153,10 +155,14 @@ public partial class App : System.Windows.Application
 
         // First-launch onboarding. Queued with Background priority so OnStartup
         // returns first and the message loop is fully running before the modal's
-        // nested dispatcher frame begins. Skip-on-skip semantics: Onboarding.Completed
-        // stays false until the user actually Finishes, so closing the modal early
-        // brings it back on the next launch (re-runnable via About → "Run again").
-        if (!_services.GetRequiredService<IPrefsStore>().Current.Onboarding.Completed)
+        // nested dispatcher frame begins. Skip and Finish both mark Completed=true
+        // now (per user dogfood feedback) so the modal opens once-ever; re-runnable
+        // via About → "Run again". If we're about to show onboarding, the pill's
+        // first Show() is deferred to after the modal closes so the pill isn't
+        // visible underneath. If onboarding is already complete, bind + show
+        // the pill immediately.
+        bool needsOnboarding = !_services.GetRequiredService<IPrefsStore>().Current.Onboarding.Completed;
+        if (needsOnboarding)
         {
             Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
             {
@@ -168,8 +174,30 @@ public partial class App : System.Windows.Application
                     _services.GetRequiredService<IModelManager>(),
                     _services.GetService<ILogger<OnboardingWindow>>());
                 window.ShowDialog();
+                // ShowDialog() blocks until the modal closes (Finish or Skip);
+                // BindPillAndShow runs once the modal is gone so the pill's
+                // FadePillIn animation isn't masked by the modal.
+                BindPillAndShow();
             }));
         }
+        else
+        {
+            BindPillAndShow();
+        }
+    }
+
+    private void BindPillAndShow()
+    {
+        // Subscribing to the BehaviorSubject immediately emits its current
+        // snapshot (Idle), which triggers FadePillIn → ShowAtForegroundMonitor
+        // → the OS-level Show() inside FloatingPillWindow. So calling Bind()
+        // here is what makes the pill appear.
+        if (_pill is null || _coordinator is null || _services is null)
+        {
+            return;
+        }
+        _pill.Bind(_coordinator.State);
+        _pill.BindLevels(_services.GetRequiredService<IAudioRecorder>().Levels);
     }
 
     private static void ConfigureServices(IServiceCollection services)
