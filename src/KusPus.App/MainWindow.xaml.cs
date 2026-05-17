@@ -1423,90 +1423,159 @@ public partial class MainWindow : Window
         }
     }
 
+    // History table row — Grid layout that mirrors the table header's column geometry
+    // (14 / 78 / 110 / * / 72 / 52). Mono font for time / model / duration columns
+    // per the skill's number-tabular rule. Transcript truncates with ellipsis and
+    // exposes the full text via ToolTip per the skill's truncation-strategy rule.
+    // Right-click context menu offers Copy / Delete.
     private Border BuildHistoryRow(TranscriptRecord r)
     {
-        var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
         bool ok = r.Status == TranscriptStatus.Ok;
-        // §13.5 P1-7: pull the Dot.Mint / Dot.Red style from Application.Resources
-        // so the dot picks up the same 7 px ellipse + 6 px coloured glow as every
-        // other status indicator in the window. FindResource walks up the resource
-        // chain so MainWindow.Resources isn't enough — needs the App-level dictionary.
+
+        var grid = new Grid { VerticalAlignment = VerticalAlignment.Center };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(78) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(110) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });
+
+        // Col 0 — status dot (Dot.Mint for ok, Dot.Red for failed).
         var dot = new Ellipse
         {
             Style = (Style)System.Windows.Application.Current.FindResource(
                 ok ? "Dot.Mint" : "Dot.Red"),
         };
         Grid.SetColumn(dot, 0);
+        grid.Children.Add(dot);
 
-        var stack = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
-        var header = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal };
-        header.Children.Add(new TextBlock
+        // Col 1 — time, mono, muted. Relative format ("2m ago" / "May 14").
+        var time = new TextBlock
         {
             Text = FormatRelative(r.Timestamp),
             FontFamily = new WpfFontFamily("Cascadia Mono, Consolas, monospace"),
             FontSize = 11,
             Foreground = Theme("MutedText"),
             VerticalAlignment = VerticalAlignment.Center,
-        });
+            ToolTip = r.Timestamp.LocalDateTime.ToString(
+                "yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture),
+            Margin = new Thickness(0, 0, 12, 0),
+        };
+        Grid.SetColumn(time, 1);
+        grid.Children.Add(time);
+
+        // Col 2 — target app, sans, secondary. Truncates at the column width.
+        var app = new TextBlock
+        {
+            Text = string.IsNullOrEmpty(r.TargetApp) ? "—" : r.TargetApp,
+            FontFamily = new WpfFontFamily("Segoe UI Variable Text, Segoe UI"),
+            FontSize = 12.5,
+            FontWeight = FontWeights.Medium,
+            Foreground = Theme("SecondaryText"),
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            Margin = new Thickness(0, 0, 12, 0),
+        };
         if (!string.IsNullOrEmpty(r.TargetApp))
         {
-            header.Children.Add(new TextBlock
-            {
-                Text = "·",
-                FontSize = 11,
-                Foreground = Theme("DisabledText"),
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(8, 0, 8, 0),
-            });
-            header.Children.Add(new TextBlock
-            {
-                Text = r.TargetApp,
-                FontFamily = new WpfFontFamily("Segoe UI Variable Text, Segoe UI"),
-                FontSize = 11,
-                FontWeight = FontWeights.Medium,
-                Foreground = Theme("SecondaryText"),
-                VerticalAlignment = VerticalAlignment.Center,
-            });
+            app.ToolTip = r.TargetApp;
         }
-        stack.Children.Add(header);
+        Grid.SetColumn(app, 2);
+        grid.Children.Add(app);
 
-        stack.Children.Add(new TextBlock
+        // Col 3 — transcript, sans, primary. Failed transcripts render italic red.
+        // ToolTip exposes the full text since we ellipsize.
+        var transcript = new TextBlock
         {
             Text = r.Text,
             FontFamily = new WpfFontFamily("Segoe UI Variable Text, Segoe UI"),
             FontSize = 13,
             Foreground = ok ? Theme("PrimaryText") : Theme("ErrorRed"),
             FontStyle = ok ? FontStyles.Normal : FontStyles.Italic,
+            VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
-            MaxWidth = 540,
-            Margin = new Thickness(0, 4, 0, 0),
-        });
-        Grid.SetColumn(stack, 1);
+            ToolTip = r.Text,
+            Margin = new Thickness(0, 0, 12, 0),
+        };
+        Grid.SetColumn(transcript, 3);
+        grid.Children.Add(transcript);
 
-        var footer = new TextBlock
+        // Col 4 — model, mono, muted. Strip "ggml-" prefix to match sidebar shorthand.
+        var model = new TextBlock
         {
-            Text = $"{r.Model} · {r.Duration.TotalSeconds:F1}s",
+            Text = ShortModelId(r.Model),
             FontFamily = new WpfFontFamily("Cascadia Mono, Consolas, monospace"),
-            FontSize = 10.5,
+            FontSize = 11,
             Foreground = Theme("MutedText"),
             VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            Margin = new Thickness(0, 0, 12, 0),
         };
-        Grid.SetColumn(footer, 2);
+        Grid.SetColumn(model, 4);
+        grid.Children.Add(model);
 
-        grid.Children.Add(dot);
-        grid.Children.Add(stack);
-        grid.Children.Add(footer);
+        // Col 5 — duration, mono, right-aligned (numeric column → tabular).
+        var duration = new TextBlock
+        {
+            Text = $"{r.Duration.TotalSeconds:F1}s",
+            FontFamily = new WpfFontFamily("Cascadia Mono, Consolas, monospace"),
+            FontSize = 11,
+            Foreground = Theme("MutedText"),
+            VerticalAlignment = VerticalAlignment.Center,
+            TextAlignment = TextAlignment.Right,
+        };
+        Grid.SetColumn(duration, 5);
+        grid.Children.Add(duration);
 
         return new Border
         {
-            Style = (Style)FindResource("RowCard"),
-            Margin = new Thickness(0, 0, 0, 1),
+            Style = (Style)FindResource("HistoryRow"),
             Child = grid,
+            ContextMenu = BuildHistoryContextMenu(r),
         };
+    }
+
+    private static string ShortModelId(string raw) =>
+        raw.StartsWith("ggml-", StringComparison.Ordinal) ? raw["ggml-".Length..] : raw;
+
+    private System.Windows.Controls.ContextMenu BuildHistoryContextMenu(TranscriptRecord r)
+    {
+        var menu = new System.Windows.Controls.ContextMenu();
+
+        var copy = new System.Windows.Controls.MenuItem { Header = "Copy text" };
+        copy.Click += (_, _) =>
+        {
+            try
+            {
+                System.Windows.Clipboard.SetText(r.Text);
+            }
+            catch (System.Runtime.InteropServices.COMException ex)
+            {
+#pragma warning disable CA1848, CA1873
+                _logger.LogWarning(ex, "Clipboard write failed for history Copy.");
+#pragma warning restore CA1848, CA1873
+            }
+        };
+        menu.Items.Add(copy);
+
+        var del = new System.Windows.Controls.MenuItem { Header = "Delete" };
+        del.Click += async (_, _) =>
+        {
+            try
+            {
+                await _history.DeleteAsync(r.Id).ConfigureAwait(true);
+                await ReloadHistoryAsync().ConfigureAwait(true);
+            }
+            catch (Microsoft.Data.Sqlite.SqliteException ex)
+            {
+#pragma warning disable CA1848, CA1873
+                _logger.LogWarning(ex, "DeleteAsync failed for transcript {Id}.", r.Id);
+#pragma warning restore CA1848, CA1873
+            }
+        };
+        menu.Items.Add(del);
+
+        return menu;
     }
 
     private static string FormatRelative(DateTimeOffset ts)

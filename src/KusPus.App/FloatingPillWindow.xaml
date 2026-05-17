@@ -195,7 +195,7 @@
                         Background="Transparent"
                         BorderThickness="0"
                         Cursor="Hand"
-                        ToolTip="Settings — coming soon"
+                        ToolTip="Open Preferences"
                         Click="OnSettingsClick">
                     <Button.Template>
                         <ControlTemplate TargetType="Button">

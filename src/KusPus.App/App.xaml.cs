@@ -109,6 +109,10 @@ public partial class App : System.Windows.Application
             _coordinator,
             _services.GetService<ILogger<MainWindow>>());
 
+        // Pill's hover-extended Settings button opens Preferences too (audit follow-
+        // up). Wired here, not above, because _mainWindow has to exist first.
+        _pill.SetSettingsAction(() => _mainWindow.ShowOn("general"));
+
         _tray = new TrayManager(
             _coordinator,
             onPreferences: () => _mainWindow.ShowOn("general"),

@@ -178,6 +178,20 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- ── History table row (audit follow-up: History as table, not card list) ── -->
+        <Style x:Key="HistoryRow" TargetType="Border">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderDivider}"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+            <Setter Property="Padding" Value="14,8,14,8"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource HoverSubtle}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </Window.Resources>
 
     <Grid>
@@ -450,7 +464,7 @@
                     </Border>
 
                     <TextBlock Style="{StaticResource SectionHeader}" Text="Available models"/>
-                    <StackPanel x:Name="ModelsList" Margin="0,0,0,12"/>
+                    <StackPanel x:Name="ModelsList" Margin="0,0,0,16"/>
                     <TextBlock x:Name="ModelsHint"
                                Text="Tap an installed model to activate. The bundled tiny model ships with KusPus."
                                Style="{StaticResource Type.RowSubtitle}"
@@ -513,10 +527,43 @@
                         </Grid>
                     </Border>
 
+                    <!-- Table header row. Same Grid column geometry as each body row
+                         in BuildHistoryRow so the eyebrow labels align over their data
+                         columns. Status column intentionally has no label. -->
+                    <Border Padding="14,10,14,10"
+                            BorderBrush="{DynamicResource BorderSubtle}"
+                            BorderThickness="0,0,0,1">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="14"/>
+                                <ColumnDefinition Width="78"/>
+                                <ColumnDefinition Width="110"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="72"/>
+                                <ColumnDefinition Width="52"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="1" Text="TIME"
+                                       Style="{StaticResource Type.Eyebrow}"
+                                       Margin="0,0,12,0"/>
+                            <TextBlock Grid.Column="2" Text="APP"
+                                       Style="{StaticResource Type.Eyebrow}"
+                                       Margin="0,0,12,0"/>
+                            <TextBlock Grid.Column="3" Text="TRANSCRIPT"
+                                       Style="{StaticResource Type.Eyebrow}"
+                                       Margin="0,0,12,0"/>
+                            <TextBlock Grid.Column="4" Text="MODEL"
+                                       Style="{StaticResource Type.Eyebrow}"
+                                       Margin="0,0,12,0"/>
+                            <TextBlock Grid.Column="5" Text="DUR"
+                                       Style="{StaticResource Type.Eyebrow}"
+                                       TextAlignment="Right"/>
+                        </Grid>
+                    </Border>
+
                     <StackPanel x:Name="HistoryList"/>
 
                     <!-- Bulk footer (§3.3 Tab 4 #3). -->
-                    <Border Margin="0,18,0,0"
+                    <Border Margin="0,16,0,0"
                             BorderBrush="{DynamicResource BorderDivider}"
                             BorderThickness="0,1,0,0"
                             Padding="0,16,0,0">
@@ -666,7 +713,7 @@
                 <StackPanel x:Name="ContentAbout" Visibility="Collapsed"
                             xmlns:svgc="http://sharpvectors.codeplex.com/svgc/">
                     <!-- Header row: 80px brand mark + wordmark + version + build info. -->
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,32">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,28">
                         <svgc:SvgViewbox Source="pack://application:,,,/icon.svg"
                                          Height="80" Width="80"
                                          Stretch="Uniform"

@@ -157,6 +157,7 @@ public partial class FloatingPillWindow : Window
 
     private ILogger<FloatingPillWindow> _logger = NullLogger<FloatingPillWindow>.Instance;
     private Action? _onClose;
+    private Action? _onSettings;
 
     // ── Visualizer state ────────────────────────────────────────────────────
     private readonly WpfRectangle[] _bars = new WpfRectangle[BarCount];
@@ -198,6 +199,14 @@ public partial class FloatingPillWindow : Window
     /// Hook for the close button (§10.1). The App passes <c>Application.Shutdown</c> here.
     /// </summary>
     public void SetCloseAction(Action onClose) => _onClose = onClose;
+
+    /// <summary>
+    /// Wires the hover-extended Settings button to a host-supplied callback —
+    /// in App.OnStartup, this is bound to <c>MainWindow.ShowOn("general")</c> so
+    /// the pill's gear button opens the same Preferences modal as the tray menu's
+    /// "Preferences…" item. Per docs/APP_DESIGN.md §13 audit follow-up.
+    /// </summary>
+    public void SetSettingsAction(Action onSettings) => _onSettings = onSettings;
 
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
@@ -806,7 +815,8 @@ public partial class FloatingPillWindow : Window
     private void OnSettingsClick(object sender, RoutedEventArgs e)
     {
 #pragma warning disable CA1848, CA1873
-        _logger.LogDebug("Settings button clicked (no-op until Phase 9 settings modal).");
+        _logger.LogDebug("Settings button clicked — opening Preferences.");
 #pragma warning restore CA1848, CA1873
+        _onSettings?.Invoke();
     }
 }
