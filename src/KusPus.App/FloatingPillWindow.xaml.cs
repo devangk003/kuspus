@@ -1001,8 +1001,34 @@ public partial class FloatingPillWindow : Window
     {
         _prefsBridge = prefs;
         _audioBridge = audio;
+        // Warm the device cache on a background thread so the first picker
+        // open is instant. Without this, MMDeviceEnumerator.EnumerateAudioEndPoints
+        // runs synchronously on the click — same root cause as the audio tab
+        // combo lag fixed in f4d2413 (~150 ms COM round-trip per open).
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var devices = audio.EnumerateInputDevices();
+                Dispatcher.BeginInvoke(() =>
+                {
+                    _cachedMicDevices = devices;
+                    UpdateMicChooserLabel();
+                });
+            }
+            catch (COMException)
+            {
+                // Enumeration fails on shutdown / fresh-install — picker
+                // will fall back to live-enum on first click.
+            }
+        });
         UpdateMicChooserLabel();
     }
+
+    // Cached at SetBridges time on a background thread. Reused on every picker
+    // open so the popup appears instantly. Refreshed in the background after
+    // each open so hot-plugged devices appear on the next open.
+    private IReadOnlyList<(string Id, string Name)>? _cachedMicDevices;
 
     /// <summary>
     /// Composition root calls this with (userToggle OR Windows reduced-motion).
@@ -1170,6 +1196,30 @@ public partial class FloatingPillWindow : Window
         BuildMicChooserList();
         _pickerOpen = true;
         MicChooserPopup.IsOpen = true;
+        // Refresh the cache in the background so a hot-plugged device shows
+        // up next time the picker opens. Doesn't block this open.
+        RefreshMicCacheAsync();
+    }
+
+    private void RefreshMicCacheAsync()
+    {
+        if (_audioBridge is null)
+        {
+            return;
+        }
+        var audio = _audioBridge;
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var devices = audio.EnumerateInputDevices();
+                Dispatcher.BeginInvoke(() => _cachedMicDevices = devices);
+            }
+            catch (COMException)
+            {
+                // Treat as "stale cache is better than no cache" — leave existing.
+            }
+        });
     }
 
     private void OnMicChooserPopupClosed(object? sender, EventArgs e)
@@ -1192,7 +1242,10 @@ public partial class FloatingPillWindow : Window
             return;
         }
         MicChooserList.Children.Clear();
-        var devices = _audioBridge.EnumerateInputDevices();
+        // Use the cached list if we have one; fall back to live enum on the
+        // very first open before the background warm completes. Subsequent
+        // opens always hit the cache → no perceptible lag.
+        var devices = _cachedMicDevices ?? _audioBridge.EnumerateInputDevices();
         var currentId = _prefsBridge.CurrentInputDeviceId;
 
         MicChooserList.Children.Add(BuildMicChooserItem(
@@ -1288,7 +1341,10 @@ public partial class FloatingPillWindow : Window
             MicChooserLabel.Text = "Default device";
             return;
         }
-        var devices = _audioBridge.EnumerateInputDevices();
+        // Same caching strategy as BuildMicChooserList — use the cache if
+        // populated (the warm task may not have completed yet on very early
+        // calls; fall back to live enum once).
+        var devices = _cachedMicDevices ?? _audioBridge.EnumerateInputDevices();
         var match = devices.FirstOrDefault(d => string.Equals(d.Id, currentId, StringComparison.Ordinal));
         MicChooserLabel.Text = match.Name ?? "Default device";
     }

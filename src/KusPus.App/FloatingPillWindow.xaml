@@ -283,13 +283,14 @@
         </Border>
 
         <!-- ── DOCK DRAWER (row 1) ────────────────────────────────────────── -->
-        <!-- Insets 24 px from each side of the pill so it reads as a nested
-             sub-element instead of a flush continuation. Sits below the pill.
-             Hidden by default (slides up behind + fades out). On hover (or
-             pinned): slides down + fades in. -->
+        <!-- Flush with the pill's bottom edge (no horizontal inset). The window
+             is AllowsTransparency="False" because Mica requires it, so any
+             margin between the dock and the window edge renders as opaque
+             window-background black instead of click-through. The previous
+             24 px margin tried to make the dock visually narrower but exposed
+             those black strips. -->
         <Border x:Name="DockDrawer"
                 Grid.Row="1"
-                Margin="24,0,24,0"
                 Background="{DynamicResource PillSurface}"
                 BorderBrush="{DynamicResource PillBorder}"
                 BorderThickness="1,0,1,1"

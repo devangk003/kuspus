@@ -352,11 +352,12 @@ public partial class MainWindow : Window
         // Cluster 9E: live-level polling only runs while Audio tab is showing.
         if (key == "audio")
         {
-            // Repopulate the device combo + match the persisted selection
-            // before opening the meter — so the meter uses the right device
-            // and the closed-state ComboBox text is correct on first open.
-            PopulateInputDeviceCombo();
-            StartAudioMeter();
+            // Audio-tab init is non-blocking — the panel paints first, then a
+            // background task does the MMDevice COM enumeration + WasapiCapture
+            // session open. Without this the dispatcher stalled for ~250-500 ms
+            // on first tab open (device negotiation is slow on some drivers).
+            // Hot-plugged devices appear on the next tab visit.
+            _ = OpenAudioTabAsync();
         }
         else
         {
@@ -818,7 +819,21 @@ public partial class MainWindow : Window
     // tree teardown). Population now happens ONCE when the Audio tab opens.
     // Hot-plugged devices show up the next time the user revisits the tab.
 
-    private void PopulateInputDeviceCombo()
+    // Orchestrates the audio tab's heavy init off the dispatcher: device
+    // enumeration (Win32 COM) and WasapiCapture session opening (device-driver
+    // negotiation — slow on some hardware) both run on Task.Run. The combo
+    // populates and the meter starts ticking as soon as each piece is ready.
+    private async Task OpenAudioTabAsync()
+    {
+        // First the device list, since the meter wants the user's preferred id.
+        var items = await Task.Run(EnumerateInputDeviceItems).ConfigureAwait(true);
+        ApplyInputDeviceItems(items);
+        // Then the capture session + meter timer — also off-thread so a slow
+        // WasapiCapture init doesn't freeze the panel.
+        await StartAudioMeterAsync().ConfigureAwait(true);
+    }
+
+    private List<InputDeviceItem> EnumerateInputDeviceItems()
     {
         var items = new List<InputDeviceItem>
         {
@@ -846,7 +861,11 @@ public partial class MainWindow : Window
             _logger.LogWarning(ex, "EnumerateAudioEndpoints failed.");
 #pragma warning restore CA1848, CA1873
         }
+        return items;
+    }
 
+    private void ApplyInputDeviceItems(List<InputDeviceItem> items)
+    {
         _suppressInputDeviceChanged = true;
         try
         {
@@ -954,39 +973,75 @@ public partial class MainWindow : Window
             NAudio.CoreAudioApi.Role.Communications);
     }
 
-    private void StartAudioMeter()
+    // Synchronous façade — kept so existing callers (OnIsVisibleChanged, the
+    // mid-test resume path, the device-change restart) read identically. It's
+    // a fire-and-forget over the real async impl; meter init runs off-thread.
+    private void StartAudioMeter() => _ = StartAudioMeterAsync();
+
+    private async Task StartAudioMeterAsync()
     {
         if (_audioMeterCapture is null)
         {
-            try
+            var saved = _prefs.Current.Audio.InputDeviceId;
+            // WasapiCapture's ctor + StartRecording negotiate the device's
+            // shared-mode format with the audio driver — this is the slow
+            // step (~150-500 ms on some drivers). Move it off the UI thread
+            // so the Audio panel paints immediately.
+            var setup = await Task.Run(() =>
             {
-                _mmEnumerator ??= new NAudio.CoreAudioApi.MMDeviceEnumerator();
-                var device = ResolveLevelMeterDevice(_mmEnumerator, _prefs.Current.Audio.InputDeviceId);
+                try
+                {
+                    _mmEnumerator ??= new NAudio.CoreAudioApi.MMDeviceEnumerator();
+                    var device = ResolveLevelMeterDevice(_mmEnumerator, saved);
+                    var capture = new NAudio.CoreAudioApi.WasapiCapture(device);
+                    return (Capture: (NAudio.CoreAudioApi.WasapiCapture?)capture,
+                            Error: (string?)null,
+                            Exception: (Exception?)null);
+                }
+                catch (COMException ex)
+                {
+                    return (Capture: null,
+                            Error: "No microphone detected — plug one in or pick another in the dropdown.",
+                            Exception: (Exception?)ex);
+                }
+                catch (NAudio.MmException ex)
+                {
+                    return (Capture: null,
+                            Error: "Microphone busy or blocked — check Windows Privacy → Microphone.",
+                            Exception: (Exception?)ex);
+                }
+            }).ConfigureAwait(true);
 
-                var capture = new NAudio.CoreAudioApi.WasapiCapture(device);
-                _meterCaptureIsFloat = capture.WaveFormat.Encoding ==
-                    NAudio.Wave.WaveFormatEncoding.IeeeFloat;
-                _meterBytesPerSample = capture.WaveFormat.BitsPerSample / 8;
-                capture.DataAvailable += OnMeterDataAvailable;
-                capture.StartRecording();
-                _audioMeterCapture = capture;
-            }
-            catch (COMException ex)
+            if (setup.Capture is null)
             {
 #pragma warning disable CA1848, CA1873
-                _logger.LogWarning(ex, "Audio meter setup failed — no capture device?");
+                _logger.LogWarning(setup.Exception, "Audio meter setup failed: {Reason}", setup.Error);
 #pragma warning restore CA1848, CA1873
-                AudioDeviceSubtitle.Text = "No microphone detected — plug one in or pick another in the dropdown.";
+                AudioDeviceSubtitle.Text = setup.Error ?? "Audio meter unavailable.";
                 return;
+            }
+
+            // Back on UI thread — wire callbacks + start. StartRecording itself
+            // is the cheap part now that the driver-negotiation already happened.
+            var capture = setup.Capture;
+            _meterCaptureIsFloat = capture.WaveFormat.Encoding ==
+                NAudio.Wave.WaveFormatEncoding.IeeeFloat;
+            _meterBytesPerSample = capture.WaveFormat.BitsPerSample / 8;
+            capture.DataAvailable += OnMeterDataAvailable;
+            try
+            {
+                capture.StartRecording();
             }
             catch (NAudio.MmException ex)
             {
 #pragma warning disable CA1848, CA1873
-                _logger.LogWarning(ex, "WasapiCapture init failed — privacy block / busy device?");
+                _logger.LogWarning(ex, "WasapiCapture.StartRecording failed after async init.");
 #pragma warning restore CA1848, CA1873
+                capture.Dispose();
                 AudioDeviceSubtitle.Text = "Microphone busy or blocked — check Windows Privacy → Microphone.";
                 return;
             }
+            _audioMeterCapture = capture;
         }
         if (_meterTimer is null)
         {
