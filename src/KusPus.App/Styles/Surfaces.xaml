@@ -1,0 +1,78 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!--
+        Surface style set per docs/APP_DESIGN.md §13.5 audit (Wave B). MainWindow
+        and OnboardingWindow currently bake card chrome (Background + BorderBrush +
+        BorderThickness + CornerRadius + Padding) inline at every <Border> that
+        wraps a row, an emphasis block, a warning, or a Local-first section.
+        Wave B collapses that repetition into five named Border styles — one per
+        semantic surface — so the chrome lives in exactly one place per variant.
+
+        Background / BorderBrush bindings use DynamicResource so a runtime theme
+        flip (light ↔ dark via App.SwitchTheme) propagates through every surface
+        the same way the brushes themselves swap, with no XAML reload required.
+
+        This file is additive only. App.xaml's MergedDictionaries is updated by
+        the orchestrator — this PR does NOT edit App.xaml. MainWindow.xaml's
+        existing "RowCard" style stays in place for now; the ~14 RowCard call
+        sites are migrated to "Surface.Default" in a later wave, after this
+        dictionary is registered and the visual diff is reviewed.
+
+        Variants, by intent:
+            Surface.Default  — standard row card (16,14 padding, 8 px radius).
+                               Future replacement for the inline RowCard style.
+            Surface.Hero     — emphasis card (20,16 padding) for sections that
+                               anchor a tab — General "Hotkey", Privacy
+                               Local-first wrapper.
+            Surface.Tight    — denser inline data (14,8 padding) for things
+                               like the History search bar nested inside the
+                               unified History card.
+            Surface.Warning  — General-tab ConflictRow. Amber tint + amber
+                               border, 6 px radius (tighter than the neutral
+                               cards to read as an inline alert, not a section).
+            Surface.Mint     — Privacy Local-first emphasis card. Mint tint +
+                               mint border, 8 px radius, 20,16 padding (same
+                               footprint as Surface.Hero).
+    -->
+
+    <Style x:Key="Surface.Default" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource Surface}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="16,14"/>
+    </Style>
+
+    <Style x:Key="Surface.Hero" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource Surface}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="20,16"/>
+    </Style>
+
+    <Style x:Key="Surface.Tight" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource Surface}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="14,8"/>
+    </Style>
+
+    <Style x:Key="Surface.Warning" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource WarningTint}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource WarningBorder}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="6"/>
+        <Setter Property="Padding" Value="14,10"/>
+    </Style>
+
+    <Style x:Key="Surface.Mint" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource MintTint}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource MintBorder}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="20,16"/>
+    </Style>
+
+</ResourceDictionary>

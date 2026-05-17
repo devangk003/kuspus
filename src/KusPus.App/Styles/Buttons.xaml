@@ -1,0 +1,142 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!--
+        Button style set per APP_DESIGN §3.4 (Button — 4 kinds × 3 sizes) +
+        §13.5 (P1-1). Replaces the inline Background / Foreground / BorderThickness
+        triplets at every Button call site with a Style reference.
+
+        Kinds (semantic intent):
+            Btn.Primary    — mint background, dark text, transparent border       (one per surface)
+            Btn.Secondary  — elevated surface, primary text, subtle border        (default action)
+            Btn.Ghost      — transparent background, primary text, subtle border  (tertiary action)
+            Btn.Danger     — transparent background, error-red text + red border  (destructive)
+            Btn.IconGhost  — 28×28 transparent icon-only button, Fluent glyph     (in-surface icon action)
+
+        Sizes (Padding + font):
+            Btn.Sm         — 5 × 10 px, 11.5 px
+            Btn.Md         — 7 × 14 px, 12.5 px  (default — matches existing 14,7 inline buttons)
+            Btn.Lg         — 11 × 20 px, 14 px
+
+        Compose kind + size by setting BasedOn. Default kind comes with Md size
+        baked in; for a non-default size, use the explicit size key with BasedOn
+        pointing at the kind. Example:
+            <Button Style="{StaticResource Btn.Secondary}"/>          → md secondary
+            <Button Style="{StaticResource Btn.Primary.Lg}"/>         → lg primary
+
+        Hover: applies a brightness lift via Opacity (DropShadowEffect approach
+        introduces too much extra geometry for an unnecessary effect at this size).
+
+        Current call sites (as of audit Wave D):
+            Btn.Primary    — 0 callers (reserved design-system role; instantiate when a primary CTA is needed)
+            Btn.Secondary  — 4 in MainWindow.xaml (Open in Explorer ×2, Open on GitHub, Run again) + 3 in code-behind (Models Download / Retry / Cancel-secondary)
+            Btn.Ghost      — 1 in code-behind (Models Download Cancel)
+            Btn.Danger     — 2 in MainWindow.xaml (Clear logs, Purge all history)
+            Btn.IconGhost  — 1 in MainWindow.xaml (History search-clear)
+            Btn.Sm         — 0 callers (reserved size; instantiate when a compact action is needed)
+            Btn.Lg         — 0 callers (reserved size; instantiate when a hero/CTA action is needed)
+
+        The empty roles (Btn.Primary, Btn.Sm, Btn.Lg) are deliberately retained as
+        design-system vocabulary per the audit — not dead code.
+    -->
+
+    <!-- ── Base sizes (TargetType Button so callers can BasedOn easily) ── -->
+
+    <Style x:Key="Btn.Base" TargetType="Button">
+        <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI"/>
+        <Setter Property="FontWeight" Value="Medium"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource Focus.Mint}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="bg"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="6"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          TextElement.FontFamily="{TemplateBinding FontFamily}"
+                                          TextElement.FontSize="{TemplateBinding FontSize}"
+                                          TextElement.FontWeight="{TemplateBinding FontWeight}"
+                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="bg" Property="Opacity" Value="0.85"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="bg" Property="Opacity" Value="0.7"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="bg" Property="Opacity" Value="0.45"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="Btn.Sm" TargetType="Button" BasedOn="{StaticResource Btn.Base}">
+        <Setter Property="FontSize" Value="11.5"/>
+        <Setter Property="Padding" Value="10,5"/>
+    </Style>
+
+    <Style x:Key="Btn.Md" TargetType="Button" BasedOn="{StaticResource Btn.Base}">
+        <Setter Property="FontSize" Value="12.5"/>
+        <Setter Property="Padding" Value="14,7"/>
+    </Style>
+
+    <Style x:Key="Btn.Lg" TargetType="Button" BasedOn="{StaticResource Btn.Base}">
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="Padding" Value="20,11"/>
+    </Style>
+
+    <!-- ── Kinds (default size = Md, swap BasedOn for other sizes) ── -->
+
+    <Style x:Key="Btn.Primary" TargetType="Button" BasedOn="{StaticResource Btn.Md}">
+        <Setter Property="Background" Value="{DynamicResource Mint}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Mint}"/>
+        <Setter Property="Foreground" Value="#0F1F18"/>
+    </Style>
+
+    <Style x:Key="Btn.Secondary" TargetType="Button" BasedOn="{StaticResource Btn.Md}">
+        <Setter Property="Background" Value="{DynamicResource SurfaceElevated}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderStrong}"/>
+        <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+    </Style>
+
+    <Style x:Key="Btn.Ghost" TargetType="Button" BasedOn="{StaticResource Btn.Md}">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}"/>
+        <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+    </Style>
+
+    <Style x:Key="Btn.Danger" TargetType="Button" BasedOn="{StaticResource Btn.Md}">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="#55EF5350"/>
+        <Setter Property="Foreground" Value="{DynamicResource ErrorRed}"/>
+    </Style>
+
+    <!-- Small icon-only buttons inside other surfaces — e.g. the "×" clear
+         button in the History tab's search box. -->
+    <Style x:Key="Btn.IconGhost" TargetType="Button" BasedOn="{StaticResource Btn.Base}">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Foreground" Value="{DynamicResource MutedText}"/>
+        <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="Padding" Value="6,4"/>
+        <Setter Property="Width" Value="28"/>
+        <Setter Property="Height" Value="28"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+
+</ResourceDictionary>

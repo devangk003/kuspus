@@ -1,0 +1,964 @@
+<Window x:Class="KusPus.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="KusPus"
+        Icon="/icon.ico"
+        Width="880" Height="620"
+        MinWidth="820" MinHeight="600"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource AppBg}"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display"
+        ShowInTaskbar="True">
+    <!--
+        MainWindow per docs/APP_DESIGN.md §3. System chrome (no custom title bar);
+        title bar tint set via DwmSetWindowAttribute in code-behind.
+        Closing hides the window (§3.1) — quit only via tray.
+        All colours are DynamicResource brushes registered by ThemeTokens — the
+        ThemeService flips brush.Color when the user changes the Appearance pref.
+        Typography styles (SectionHeader, Type.RowTitle, Type.RowSubtitle,
+        Type.Eyebrow, Type.MonoSm, Type.Display) live in Styles/Typography.xaml
+        per APP_DESIGN §13.5 (P1-6).
+    -->
+    <Window.Resources>
+        <!-- ── Sidebar tab button (RadioButton restyled per §3.2) ─────────── -->
+        <Style x:Key="SidebarTab" TargetType="RadioButton">
+            <Setter Property="Margin" Value="0,1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Foreground" Value="{DynamicResource SecondaryText}"/>
+            <Setter Property="FocusVisualStyle" Value="{DynamicResource Focus.Mint}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Grid>
+                            <Rectangle x:Name="stripe"
+                                       Width="3" Height="18"
+                                       Fill="{DynamicResource Mint}" RadiusX="2" RadiusY="2"
+                                       HorizontalAlignment="Left"
+                                       VerticalAlignment="Center"
+                                       Margin="-4,0,0,0"
+                                       Opacity="0"/>
+                            <Border x:Name="bg" CornerRadius="6" Padding="10,9">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="icon"
+                                               Grid.Column="0"
+                                               Text="{TemplateBinding Tag}"
+                                               FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                               FontSize="16"
+                                               Foreground="{DynamicResource SecondaryText}"
+                                               VerticalAlignment="Center"/>
+                                    <ContentPresenter Grid.Column="1"
+                                                      Margin="12,0,0,0"
+                                                      VerticalAlignment="Center"
+                                                      TextElement.FontFamily="Segoe UI Variable Text, Segoe UI"
+                                                      TextElement.FontSize="12.5"
+                                                      TextElement.FontWeight="Medium"
+                                                      TextElement.Foreground="{DynamicResource SecondaryText}"/>
+                                </Grid>
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bg" Property="Background" Value="{DynamicResource HoverSubtle}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="bg" Property="Background" Value="{DynamicResource Surface}"/>
+                                <Setter TargetName="icon" Property="Foreground" Value="{DynamicResource Mint}"/>
+                                <Setter TargetName="stripe" Property="Opacity" Value="1"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- SectionHeader moved to Styles/Typography.xaml per APP_DESIGN §13.5 (P1-6). -->
+
+        <Style x:Key="RowCard" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource Surface}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="16,14"/>
+        </Style>
+
+        <!-- ── Toggle switch (§3.4) — kept dark-styled in both themes for legibility -->
+        <Style x:Key="Toggle" TargetType="CheckBox">
+            <Setter Property="Width" Value="36"/>
+            <Setter Property="Height" Value="20"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{DynamicResource Focus.Mint}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Border x:Name="track"
+                                Background="{DynamicResource SurfaceElevated}"
+                                BorderBrush="{DynamicResource BorderStrong}"
+                                BorderThickness="1"
+                                CornerRadius="10">
+                            <Ellipse x:Name="knob"
+                                     Width="14" Height="14"
+                                     Fill="White"
+                                     HorizontalAlignment="Left"
+                                     VerticalAlignment="Center"
+                                     Margin="3,0,0,0">
+                                <Ellipse.Effect>
+                                    <DropShadowEffect Color="Black" Direction="270"
+                                                      ShadowDepth="1" BlurRadius="3" Opacity="0.3"/>
+                                </Ellipse.Effect>
+                            </Ellipse>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="track" Property="Background" Value="{DynamicResource Mint}"/>
+                                <Setter TargetName="track" Property="BorderBrush" Value="{DynamicResource Mint}"/>
+                                <Setter TargetName="knob" Property="HorizontalAlignment" Value="Right"/>
+                                <Setter TargetName="knob" Property="Margin" Value="0,0,3,0"/>
+                                <Setter TargetName="knob" Property="Fill" Value="#0F1F18"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SegmentButton" TargetType="RadioButton">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{DynamicResource Focus.Mint}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="bg" CornerRadius="5" Padding="14,6">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              TextElement.FontFamily="Segoe UI Variable Text, Segoe UI"
+                                              TextElement.FontSize="12"
+                                              TextElement.FontWeight="Medium"
+                                              TextElement.Foreground="{DynamicResource MutedText}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="bg" Property="Background" Value="{DynamicResource SurfaceElevated}"/>
+                                <Setter TargetName="bg" Property="TextElement.Foreground" Value="{DynamicResource PrimaryText}"/>
+                                <Setter TargetName="bg" Property="Effect">
+                                    <Setter.Value>
+                                        <DropShadowEffect Color="Black" Direction="270"
+                                                          ShadowDepth="1" BlurRadius="3" Opacity="0.4"/>
+                                    </Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsChecked" Value="False"/>
+                                    <Condition Property="IsMouseOver" Value="True"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="bg" Property="Background" Value="{DynamicResource HoverSubtle}"/>
+                            </MultiTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="Keycap" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource KeycapBg}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource KeycapBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Padding" Value="14,7"/>
+            <Setter Property="Effect">
+                <Setter.Value>
+                    <DropShadowEffect Color="Black" Direction="270"
+                                      ShadowDepth="1" BlurRadius="0" Opacity="0.2"/>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ── History table row (audit follow-up: History as table, not card list) ── -->
+        <Style x:Key="HistoryRow" TargetType="Border">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderDivider}"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+            <Setter Property="Padding" Value="14,8,14,8"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource HoverSubtle}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="200"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0"
+                Background="{DynamicResource Sidebar}"
+                BorderBrush="{DynamicResource BorderDivider}"
+                BorderThickness="0,0,1,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0" Margin="14,14,14,0">
+                    <RadioButton Style="{StaticResource SidebarTab}" GroupName="MainTabs"
+                                 Content="General" Tag="&#xE713;"
+                                 IsChecked="True" Checked="OnTabChecked"
+                                 x:Name="TabGeneral"/>
+                    <RadioButton Style="{StaticResource SidebarTab}" GroupName="MainTabs"
+                                 Content="Audio" Tag="&#xE720;"
+                                 Checked="OnTabChecked" x:Name="TabAudio"/>
+                    <RadioButton Style="{StaticResource SidebarTab}" GroupName="MainTabs"
+                                 Content="Models" Tag="&#xE950;"
+                                 Checked="OnTabChecked" x:Name="TabModels"/>
+                    <RadioButton Style="{StaticResource SidebarTab}" GroupName="MainTabs"
+                                 Content="History" Tag="&#xE81C;"
+                                 Checked="OnTabChecked" x:Name="TabHistory"/>
+                    <RadioButton Style="{StaticResource SidebarTab}" GroupName="MainTabs"
+                                 Content="Privacy" Tag="&#xE72E;"
+                                 Checked="OnTabChecked" x:Name="TabPrivacy"/>
+                    <RadioButton Style="{StaticResource SidebarTab}" GroupName="MainTabs"
+                                 Content="About" Tag="&#xE946;"
+                                 Checked="OnTabChecked" x:Name="TabAbout"/>
+                </StackPanel>
+
+                <Grid Grid.Row="1" Margin="14,8,14,14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Ellipse Style="{StaticResource Dot.Mint}"/>
+                    <TextBlock x:Name="StatusLabel"
+                               Grid.Column="1"
+                               Text="—"
+                               Style="{StaticResource Type.SidebarStatus}"
+                               Margin="8,0,0,0"
+                               VerticalAlignment="Center"/>
+                    <TextBlock x:Name="SidebarHotkeyGlyph"
+                               Grid.Column="2"
+                               Text="—"
+                               Style="{StaticResource Type.MonoSm}"
+                               VerticalAlignment="Center"/>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <ScrollViewer Grid.Column="1"
+                      Background="{DynamicResource AppBg}"
+                      HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto"
+                      Padding="0">
+            <Grid Margin="36,28,36,32">
+                <!-- ── General tab ──────────────────────────────────────── -->
+                <StackPanel x:Name="ContentGeneral">
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Hotkey"/>
+                    <!-- §13.5 P1-8 / P2-5: hotkey card + conflict row share a single
+                         440 px-wide column StackPanel so the conflict row sits 1 px
+                         below the card when visible, and the section gap (28 px) is
+                         owned by the wrapper instead of by a negative-margin tuck. -->
+                    <StackPanel HorizontalAlignment="Left" Width="440" Margin="0,0,0,28">
+                        <Grid>
+                            <!-- Hero surface (20,16 padding) per audit Wave B. -->
+                            <Border x:Name="HotkeyCard"
+                                    Style="{StaticResource Surface.Hero}"
+                                    Cursor="Hand"
+                                    MouseLeftButtonDown="OnHotkeyCardClick">
+                                <StackPanel>
+                                    <TextBlock x:Name="HotkeyEyebrow"
+                                               Text="HOTKEY"
+                                               Style="{StaticResource Type.Eyebrow}"
+                                               Margin="0,0,0,10"/>
+                                    <StackPanel x:Name="HotkeyKeycaps" Orientation="Horizontal"/>
+                                    <TextBlock Text="Hold this chord anywhere in Windows to start dictation. Release to stop and paste."
+                                               Style="{StaticResource Type.RowSubtitle}"
+                                               Margin="0,14,0,0"/>
+                                    <TextBlock x:Name="HotkeyHint"
+                                               Text="Tap the picker, then press a new chord."
+                                               Style="{StaticResource Type.HintItalic}"
+                                               Margin="0,6,0,0"/>
+                                </StackPanel>
+                            </Border>
+                            <Rectangle x:Name="HotkeyListenBorder"
+                                       Stroke="{DynamicResource Mint}"
+                                       StrokeThickness="1.5"
+                                       StrokeDashArray="4 3"
+                                       RadiusX="10" RadiusY="10"
+                                       Visibility="Collapsed"
+                                       IsHitTestVisible="False"/>
+                        </Grid>
+
+                        <Border x:Name="ConflictRow"
+                                Style="{StaticResource Surface.Warning}"
+                                Margin="0,1,0,0"
+                                Visibility="Collapsed">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Style="{StaticResource Dot.Amber}"/>
+                                <TextBlock Text="Shortcut conflict."
+                                           Style="{StaticResource Type.WarningEmphasis}"
+                                           VerticalAlignment="Center"
+                                           Margin="10,0,8,0"/>
+                                <TextBlock x:Name="ConflictText"
+                                           Style="{StaticResource Type.WarningBody}"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Startup"/>
+                    <Border Style="{StaticResource RowCard}" Margin="0,0,0,28">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Launch KusPus when I sign in"
+                                           Style="{StaticResource Type.RowTitle}"/>
+                                <TextBlock Text="Starts KusPus when you sign in to Windows. The tray icon stays available either way."
+                                           Style="{StaticResource Type.RowSubtitle}"/>
+                            </StackPanel>
+                            <CheckBox Grid.Column="1"
+                                      x:Name="AutostartToggle"
+                                      Style="{StaticResource Toggle}"
+                                      VerticalAlignment="Center"
+                                      Checked="OnAutostartChanged"
+                                      Unchecked="OnAutostartChanged"/>
+                        </Grid>
+                    </Border>
+
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Appearance"/>
+                    <Border Style="{StaticResource RowCard}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Theme"
+                                           Style="{StaticResource Type.RowTitle}"/>
+                                <TextBlock Text="Auto follows the Windows app-mode setting."
+                                           Style="{StaticResource Type.RowSubtitle}"/>
+                            </StackPanel>
+                            <Border Grid.Column="1"
+                                    Background="{DynamicResource SurfaceInput}"
+                                    BorderBrush="{DynamicResource BorderStrong}"
+                                    BorderThickness="1"
+                                    CornerRadius="7"
+                                    Padding="2">
+                                <StackPanel Orientation="Horizontal">
+                                    <RadioButton x:Name="ThemeAuto"
+                                                 Style="{StaticResource SegmentButton}"
+                                                 GroupName="Theme"
+                                                 Content="Auto"
+                                                 IsChecked="True"
+                                                 Checked="OnThemeChanged"/>
+                                    <RadioButton x:Name="ThemeLight"
+                                                 Style="{StaticResource SegmentButton}"
+                                                 GroupName="Theme"
+                                                 Content="Light [BETA]"
+                                                 ToolTip="Light theme is in beta — some surfaces aren't fully tuned yet."
+                                                 Checked="OnThemeChanged"/>
+                                    <RadioButton x:Name="ThemeDark"
+                                                 Style="{StaticResource SegmentButton}"
+                                                 GroupName="Theme"
+                                                 Content="Dark"
+                                                 Checked="OnThemeChanged"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
+                <!-- ── Audio tab ────────────────────────────────────────── -->
+                <StackPanel x:Name="ContentAudio" Visibility="Collapsed">
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Input device"/>
+                    <Border Style="{StaticResource RowCard}" Margin="0,0,0,28">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="Microphone"
+                                           Style="{StaticResource Type.RowTitle}"/>
+                                <TextBlock x:Name="AudioDeviceSubtitle"
+                                           Text="KusPus uses this microphone for dictation."
+                                           Style="{StaticResource Type.RowSubtitle}"/>
+                            </StackPanel>
+                            <ComboBox Grid.Column="1"
+                                      x:Name="InputDeviceCombo"
+                                      Style="{StaticResource ComboBox.Surface}"
+                                      MinWidth="240"
+                                      MaxWidth="320"
+                                      VerticalAlignment="Center"
+                                      SelectionChanged="OnInputDeviceChanged"/>
+                        </Grid>
+                    </Border>
+
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Live level"/>
+                    <Border Style="{StaticResource RowCard}" Margin="0,0,0,28">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="Microphone level"
+                                               Style="{StaticResource Type.RowTitle}"
+                                               VerticalAlignment="Center"/>
+                                    <!-- LIVE indicator — visible only while WasapiCapture is open,
+                                         per the skill's progressive-disclosure + privacy-affordance
+                                         rules. Toggled in StartAudioMeter / StopAudioMeter. -->
+                                    <StackPanel x:Name="LiveIndicator"
+                                                Orientation="Horizontal"
+                                                VerticalAlignment="Center"
+                                                Margin="10,0,0,0"
+                                                Visibility="Collapsed">
+                                        <Ellipse Style="{StaticResource Dot.Mint}"
+                                                 Width="6" Height="6"/>
+                                        <TextBlock Text="LIVE"
+                                                   Style="{StaticResource Type.Eyebrow}"
+                                                   Foreground="{DynamicResource Mint}"
+                                                   Margin="6,0,0,0"
+                                                   VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </StackPanel>
+                                <TextBlock Text="Active only while this tab is open. Audio is never recorded."
+                                           Style="{StaticResource Type.RowSubtitle}"/>
+                            </StackPanel>
+                            <!-- Discord-style level meter: gray placeholder track + mint
+                                 fill that grows from the left as input level rises, plus a
+                                 thin peak-hold tick that briefly marks the most recent loud
+                                 peak before fading. -->
+                            <Grid Grid.Column="1" Width="200" Height="28" VerticalAlignment="Center">
+                                <Border Height="6"
+                                        VerticalAlignment="Center"
+                                        CornerRadius="3"
+                                        Background="{DynamicResource MeterTrack}"/>
+                                <Border x:Name="LevelMeterFill"
+                                        Height="6"
+                                        Width="0"
+                                        VerticalAlignment="Center"
+                                        HorizontalAlignment="Left"
+                                        CornerRadius="3"
+                                        Background="{DynamicResource Mint}"/>
+                                <Rectangle x:Name="LevelMeterPeak"
+                                           Width="2" Height="12"
+                                           Fill="{DynamicResource Mint}"
+                                           HorizontalAlignment="Left"
+                                           VerticalAlignment="Center"
+                                           Margin="0"
+                                           Opacity="0"/>
+                            </Grid>
+                        </Grid>
+                    </Border>
+
+                    <!-- Test transcription. State-driven UI per the skill's loading-buttons +
+                         submit-feedback + error-recovery rules:
+                         Idle → Recording (5s countdown) → Transcribing (spinner) → Result/Error.
+                         The level meter pauses while the test records to avoid device contention. -->
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Test transcription"/>
+                    <Border Style="{StaticResource RowCard}">
+                        <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="5-second sample"
+                                               Style="{StaticResource Type.RowTitle}"/>
+                                    <TextBlock x:Name="TestSubtitle"
+                                               Text="Click Test, speak for 5 seconds, see what KusPus heard."
+                                               Style="{StaticResource Type.RowSubtitle}"/>
+                                </StackPanel>
+                                <Button x:Name="TestButton"
+                                        Grid.Column="1"
+                                        Content="Test transcription"
+                                        Style="{StaticResource Btn.Primary}"
+                                        VerticalAlignment="Center"
+                                        Click="OnTestTranscriptionClick"/>
+                            </Grid>
+                            <Border x:Name="TestResultContainer"
+                                    Background="{DynamicResource SurfaceInput}"
+                                    BorderBrush="{DynamicResource BorderSubtle}"
+                                    BorderThickness="1"
+                                    CornerRadius="6"
+                                    Padding="14,12"
+                                    Margin="0,14,0,0"
+                                    Visibility="Collapsed">
+                                <TextBlock x:Name="TestResultText"
+                                           Text=""
+                                           Style="{StaticResource Type.BodySmall}"
+                                           Margin="0"/>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- ── Models tab ───────────────────────────────────────── -->
+                <StackPanel x:Name="ContentModels" Visibility="Collapsed">
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Active model"/>
+                    <Border Style="{StaticResource RowCard}" Margin="0,0,0,28">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Style="{StaticResource Dot.Mint}"/>
+                            <TextBlock x:Name="ActiveModelText"
+                                       Text="—"
+                                       Style="{StaticResource Type.RowTitle}"
+                                       VerticalAlignment="Center"
+                                       Margin="10,0,0,0"/>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Available models"/>
+                    <StackPanel x:Name="ModelsList" Margin="0,0,0,16"/>
+                    <TextBlock x:Name="ModelsHint"
+                               Text="Tap an installed model to activate. The bundled tiny model ships with KusPus."
+                               Style="{StaticResource Type.RowSubtitle}"
+                               FontStyle="Italic"
+                               Margin="0"/>
+                </StackPanel>
+
+                <!-- ── History tab — unified composed table per audit Wave F (Q3) ── -->
+                <!-- Single RowCard wraps search bar + table header + body rows + bulk
+                     footer. Inner sections use transparent backgrounds and per-section
+                     dividers so the whole thing reads as one "history widget" instead
+                     of four separately-styled blocks. -->
+                <StackPanel x:Name="ContentHistory" Visibility="Collapsed">
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="History"/>
+
+                    <Border Style="{StaticResource RowCard}" Padding="0">
+                        <StackPanel>
+                            <!-- Search bar — debounced full-text against transcripts_fts. -->
+                            <Border Padding="14,8"
+                                    BorderBrush="{DynamicResource BorderSubtle}"
+                                    BorderThickness="0,0,0,1">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0"
+                                               Text="&#xE721;"
+                                               Style="{StaticResource Type.IconSm}"
+                                               VerticalAlignment="Center"/>
+                                    <TextBox Grid.Column="1"
+                                             x:Name="HistorySearchBox"
+                                             Style="{StaticResource Input.Search}"
+                                             Margin="10,0,0,0"
+                                             TextChanged="OnHistorySearchChanged"/>
+                                    <TextBlock x:Name="HistorySearchPlaceholder"
+                                               Grid.Column="1"
+                                               Text="Search transcripts…"
+                                               Margin="10,0,0,0"
+                                               Foreground="{DynamicResource MutedText}"
+                                               FontFamily="Segoe UI Variable Text, Segoe UI"
+                                               FontSize="13"
+                                               VerticalAlignment="Center"
+                                               IsHitTestVisible="False"/>
+                                    <Button Grid.Column="2"
+                                            x:Name="HistorySearchClear"
+                                            Content="&#xE711;"
+                                            Style="{StaticResource Btn.IconGhost}"
+                                            Margin="6,0,0,0"
+                                            Visibility="Collapsed"
+                                            Click="OnHistorySearchClearClick"/>
+                                </Grid>
+                            </Border>
+
+                            <!-- Table header row. Same Grid geometry as each BuildHistoryRow
+                                 so the eyebrow labels align over their data columns. -->
+                            <Border Padding="14,10"
+                                    BorderBrush="{DynamicResource BorderSubtle}"
+                                    BorderThickness="0,0,0,1">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="14"/>
+                                        <ColumnDefinition Width="78"/>
+                                        <ColumnDefinition Width="110"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="72"/>
+                                        <ColumnDefinition Width="52"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="1" Text="TIME"
+                                               Style="{StaticResource Type.Eyebrow}"
+                                               Margin="0,0,12,0"/>
+                                    <TextBlock Grid.Column="2" Text="APP"
+                                               Style="{StaticResource Type.Eyebrow}"
+                                               Margin="0,0,12,0"/>
+                                    <TextBlock Grid.Column="3" Text="TRANSCRIPT"
+                                               Style="{StaticResource Type.Eyebrow}"
+                                               Margin="0,0,12,0"/>
+                                    <TextBlock Grid.Column="4" Text="MODEL"
+                                               Style="{StaticResource Type.Eyebrow}"
+                                               Margin="0,0,12,0"/>
+                                    <TextBlock Grid.Column="5" Text="DUR"
+                                               Style="{StaticResource Type.Eyebrow}"
+                                               TextAlignment="Right"/>
+                                </Grid>
+                            </Border>
+
+                            <!-- Body rows. HistoryRow style already paints a 1 px
+                                 BorderDivider bottom edge per row → the last row's
+                                 bottom border IS the footer separator (no double line). -->
+                            <StackPanel x:Name="HistoryList"/>
+
+                            <!-- Bulk footer. No top border because the last HistoryRow's
+                                 bottom border already separates it from the table body. -->
+                            <Border Padding="14,12,14,12">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="HistoryStats"
+                                               Grid.Column="0"
+                                               Text="—"
+                                               Style="{StaticResource Type.RowSubtitle}"
+                                               Margin="0"
+                                               VerticalAlignment="Center"/>
+                                    <Button Grid.Column="1"
+                                            x:Name="PurgeAllButton"
+                                            Content="Purge all history"
+                                            Style="{StaticResource Btn.Danger}"
+                                            Click="OnPurgeAllClick"
+                                            VerticalAlignment="Center"/>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- ── Privacy tab ──────────────────────────────────────── -->
+                <StackPanel x:Name="ContentPrivacy" Visibility="Collapsed">
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Offline mode"/>
+                    <Border Style="{StaticResource RowCard}" Margin="0,0,0,28">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Block all outbound traffic"
+                                           Style="{StaticResource Type.RowTitle}"/>
+                                <TextBlock x:Name="OfflineSubtitle"
+                                           Text="KusPus may reach model and crash-report servers when needed."
+                                           Style="{StaticResource Type.RowSubtitle}"/>
+                            </StackPanel>
+                            <CheckBox x:Name="OfflineToggle"
+                                      Grid.Column="1"
+                                      Style="{StaticResource Toggle}"
+                                      VerticalAlignment="Center"
+                                      Checked="OnOfflineChanged"
+                                      Unchecked="OnOfflineChanged"/>
+                        </Grid>
+                    </Border>
+
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Telemetry"/>
+                    <Border Style="{StaticResource RowCard}" Margin="0,0,0,28">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Send opt-in crash reports"
+                                           Style="{StaticResource Type.RowTitle}"/>
+                                <TextBlock x:Name="CrashReportsSubtitle"
+                                           Text="Anonymous, opt-in. Never includes transcripts, audio, or clipboard contents."
+                                           Style="{StaticResource Type.RowSubtitle}"/>
+                            </StackPanel>
+                            <CheckBox x:Name="CrashReportsToggle"
+                                      Grid.Column="1"
+                                      Style="{StaticResource Toggle}"
+                                      VerticalAlignment="Center"
+                                      Checked="OnCrashReportsChanged"
+                                      Unchecked="OnCrashReportsChanged"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Accessibility — Reduce-animation toggle gates the pill's
+                         personality cues (breath / halo / hue drift / heartbeat
+                         blink). Effective if EITHER this is on OR Windows'
+                         "Show animations" accessibility setting is off. -->
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Accessibility"/>
+                    <Border Style="{StaticResource RowCard}" Margin="0,0,0,28">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Reduce pill animations"
+                                           Style="{StaticResource Type.RowTitle}"/>
+                                <TextBlock Text="Disables the breath, hue drift, and heartbeat-blink cues on the floating pill. State transitions and the dock slide remain active."
+                                           Style="{StaticResource Type.RowSubtitle}"/>
+                            </StackPanel>
+                            <CheckBox x:Name="ReducePillAnimationsToggle"
+                                      Grid.Column="1"
+                                      Style="{StaticResource Toggle}"
+                                      VerticalAlignment="Center"
+                                      Checked="OnReducePillAnimationsChanged"
+                                      Unchecked="OnReducePillAnimationsChanged"/>
+                        </Grid>
+                    </Border>
+
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Logs"/>
+                    <Border Style="{StaticResource RowCard}" Margin="0,0,0,28">
+                        <StackPanel>
+                            <!-- Row 1: total log size + Clear logs (§13.5 P1-3). -->
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Log size"
+                                               Style="{StaticResource Type.RowTitle}"/>
+                                    <TextBlock x:Name="LogsSize"
+                                               Text="Calculating…"
+                                               Style="{StaticResource Type.RowSubtitle}"/>
+                                </StackPanel>
+                                <Button Grid.Column="1"
+                                        Content="Clear logs"
+                                        Style="{StaticResource Btn.Danger}"
+                                        Click="OnClearLogsClick"
+                                        VerticalAlignment="Center"/>
+                            </Grid>
+
+                            <Border Height="1"
+                                    Background="{DynamicResource BorderDivider}"
+                                    Margin="0,14,0,14"/>
+
+                            <!-- Row 2: folder path + Open in Explorer. -->
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Log folder"
+                                               Style="{StaticResource Type.RowTitle}"/>
+                                    <TextBlock x:Name="LogsPath"
+                                               Text="—"
+                                               Style="{StaticResource Type.MonoSm}"
+                                               Margin="0,3,0,0"
+                                               TextTrimming="CharacterEllipsis"
+                                               MaxWidth="500"/>
+                                </StackPanel>
+                                <Button Grid.Column="1"
+                                        Content="Open in Explorer"
+                                        Click="OnOpenLogsClick"
+                                        Style="{StaticResource Btn.Secondary}"
+                                        VerticalAlignment="Center"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Surface.Mint}">
+                        <StackPanel>
+                            <TextBlock Text="Local-first."
+                                       Style="{StaticResource Type.MintHeadline}"/>
+                            <TextBlock Text="Audio capture, transcription, and history all stay on this machine. The only network calls KusPus makes are model downloads (Models tab) and — if you opt in — anonymous crash reports."
+                                       Style="{StaticResource Type.BodySmall}"
+                                       Margin="0,6,0,0"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- ── About tab (§3.3 Tab 6) ──────────────────────────── -->
+                <StackPanel x:Name="ContentAbout" Visibility="Collapsed"
+                            xmlns:svgc="http://sharpvectors.codeplex.com/svgc/">
+                    <!-- Header row: 80px brand mark + wordmark + version + build info. -->
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,28">
+                        <svgc:SvgViewbox Source="pack://application:,,,/icon.svg"
+                                         Height="80" Width="80"
+                                         Stretch="Uniform"
+                                         VerticalAlignment="Center"/>
+                        <StackPanel Margin="22,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="KusPus"
+                                       Style="{StaticResource Type.Display}"/>
+                            <TextBlock x:Name="AboutVersion"
+                                       Text="Version —"
+                                       Style="{StaticResource Type.Body}"
+                                       Margin="0,3,0,0"/>
+                            <TextBlock x:Name="AboutBuildLine"
+                                       Text="—"
+                                       Style="{StaticResource Type.MonoSm}"
+                                       Margin="0,3,0,0"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Resources"/>
+                    <Border Style="{StaticResource RowCard}" Margin="0,0,0,8">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Source code"
+                                           Style="{StaticResource Type.RowTitle}"/>
+                                <TextBlock Text="github.com/devangk003/kuspus"
+                                           Style="{StaticResource Type.MonoSm}"
+                                           Margin="0,3,0,0"/>
+                            </StackPanel>
+                            <Button Grid.Column="1"
+                                    Content="Open on GitHub"
+                                    Click="OnOpenGitHubClick"
+                                    Style="{StaticResource Btn.Secondary}"
+                                    VerticalAlignment="Center"/>
+                        </Grid>
+                    </Border>
+
+                    <Border Style="{StaticResource RowCard}" Margin="0,0,0,8">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Log folder"
+                                           Style="{StaticResource Type.RowTitle}"/>
+                                <TextBlock x:Name="AboutLogsPath"
+                                           Text="—"
+                                           Style="{StaticResource Type.MonoSm}"
+                                           Margin="0,3,0,0"
+                                           TextTrimming="CharacterEllipsis"
+                                           MaxWidth="500"/>
+                            </StackPanel>
+                            <Button Grid.Column="1"
+                                    Content="Open in Explorer"
+                                    Click="OnOpenLogsClick"
+                                    Style="{StaticResource Btn.Secondary}"
+                                    VerticalAlignment="Center"/>
+                        </Grid>
+                    </Border>
+
+                    <Border Style="{StaticResource RowCard}" Margin="0,0,0,28">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Re-run onboarding"
+                                           Style="{StaticResource Type.RowTitle}"/>
+                                <TextBlock Text="Walks through the 7-step first-launch flow again."
+                                           Style="{StaticResource Type.RowSubtitle}"/>
+                            </StackPanel>
+                            <Button Grid.Column="1"
+                                    Content="Run again"
+                                    Click="OnRerunOnboardingClick"
+                                    Style="{StaticResource Btn.Secondary}"
+                                    VerticalAlignment="Center"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Footer row: legal + tagline on the left, author byline + four
+                         social icons on the right. Sits directly on AppBg (no card)
+                         so the byline reads as a personal touch, not part of the
+                         design-system surface inventory. Icons use inline Path data
+                         tinted by {DynamicResource MutedText} so dark/light theme
+                         tinting is automatic. Aspect ratio is locked by each Viewbox
+                         (14×14) wrapping a 24×24 viewBox path → uniform Stretch. -->
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Left: existing legal + tagline. -->
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="MIT licensed · Local-first · No telemetry."
+                                       Style="{StaticResource Type.Footnote}"/>
+                            <TextBlock Text="Press a hotkey. Speak. Get pasted."
+                                       Style="{StaticResource Type.HintItalic}"
+                                       Margin="0,4,0,0"/>
+                        </StackPanel>
+
+                        <!-- Right: author byline + 4 icon links. -->
+                        <StackPanel Grid.Column="1" VerticalAlignment="Bottom">
+                            <TextBlock Text="Made by Devang Kumawat"
+                                       Style="{StaticResource Type.Footnote}"
+                                       HorizontalAlignment="Right"/>
+                            <StackPanel Orientation="Horizontal"
+                                        HorizontalAlignment="Right"
+                                        Margin="0,6,0,0">
+
+                                <!-- LinkedIn — Simple Icons CC0, single filled path. -->
+                                <Button Style="{StaticResource Btn.IconGhost}"
+                                        ToolTip="LinkedIn"
+                                        Click="OnOpenLinkedInClick">
+                                    <Viewbox Width="14" Height="14">
+                                        <Path Fill="{DynamicResource MutedText}"
+                                              Data="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+                                    </Viewbox>
+                                </Button>
+
+                                <!-- X — Simple Icons CC0, single filled path. -->
+                                <Button Style="{StaticResource Btn.IconGhost}"
+                                        ToolTip="X (Twitter)"
+                                        Click="OnOpenXClick">
+                                    <Viewbox Width="14" Height="14">
+                                        <Path Fill="{DynamicResource MutedText}"
+                                              Data="M14.234 10.162 22.977 0h-2.072l-7.591 8.824L7.251 0H.258l9.168 13.343L.258 24H2.33l8.016-9.318L16.749 24h6.993zm-2.837 3.299-.929-1.329L3.076 1.56h3.182l5.965 8.532.929 1.329 7.754 11.09h-3.182z"/>
+                                    </Viewbox>
+                                </Button>
+
+                                <!-- GitHub — Simple Icons CC0, single filled path. -->
+                                <Button Style="{StaticResource Btn.IconGhost}"
+                                        ToolTip="GitHub"
+                                        Click="OnOpenAuthorGitHubClick">
+                                    <Viewbox Width="14" Height="14">
+                                        <Path Fill="{DynamicResource MutedText}"
+                                              Data="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>
+                                    </Viewbox>
+                                </Button>
+
+                                <!-- Portfolio (globe) — Lucide ISC, stroke-based.
+                                     Compound geometry: ellipse + two paths in a Canvas. -->
+                                <Button Style="{StaticResource Btn.IconGhost}"
+                                        ToolTip="Portfolio (lnk.bio/devangk003)"
+                                        Click="OnOpenPortfolioClick">
+                                    <Viewbox Width="14" Height="14">
+                                        <Canvas Width="24" Height="24">
+                                            <Ellipse Canvas.Left="2" Canvas.Top="2"
+                                                     Width="20" Height="20"
+                                                     Stroke="{DynamicResource MutedText}"
+                                                     StrokeThickness="2"/>
+                                            <Path Stroke="{DynamicResource MutedText}"
+                                                  StrokeThickness="2"
+                                                  StrokeLineJoin="Round"
+                                                  StrokeStartLineCap="Round"
+                                                  StrokeEndLineCap="Round"
+                                                  Data="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/>
+                                            <Path Stroke="{DynamicResource MutedText}"
+                                                  StrokeThickness="2"
+                                                  StrokeStartLineCap="Round"
+                                                  StrokeEndLineCap="Round"
+                                                  Data="M2 12h20"/>
+                                        </Canvas>
+                                    </Viewbox>
+                                </Button>
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Grid>
+        </ScrollViewer>
+    </Grid>
+</Window>

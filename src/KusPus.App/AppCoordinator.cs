@@ -86,6 +86,13 @@ public sealed class AppCoordinator : IDisposable
     /// <summary>The pill VM binds to this to derive its content from state.</summary>
     public IObservable<CoordinatorSnapshot> State => _state;
 
+    /// <summary>
+    /// Last emitted snapshot — handy when a caller already received an unrelated
+    /// notification (e.g. PrefsStore change) and wants the current FSM state
+    /// without re-subscribing. Mirrors <see cref="IPrefsStore.Current"/>'s shape.
+    /// </summary>
+    public CoordinatorSnapshot Snapshot => _state.Value;
+
     public void Start()
     {
         // PrefsStore.Changes is a BehaviorSubject — it pushes the current value
@@ -329,6 +336,9 @@ public sealed class AppCoordinator : IDisposable
         _logger.LogInformation(
             "Paste outcome: pasted={Pasted} app={App} error={Error}.",
             outcome.Pasted, outcome.TargetApp, outcome.Error ?? "<none>");
+
+        EmitPostPasteSnapshot(outcome.Pasted, outcome.TargetApp, outcome.Error);
+
         var settingsHistory = _prefs.Current.History;
         if (!settingsHistory.Enabled)
         {
@@ -350,9 +360,26 @@ public sealed class AppCoordinator : IDisposable
         }
     }
 
+    /// <summary>
+    /// Marshals a one-shot post-paste snapshot onto the dispatcher so the pill can
+    /// render Confirmed (1 s) or Error (2 s) per design spec §2.5 / §2.6. The FSM
+    /// itself already transitioned to Idle before this fires; the snapshot rides
+    /// on top of Idle with <see cref="PostPasteInfo"/> attached.
+    /// </summary>
+    private void EmitPostPasteSnapshot(bool pasted, string targetApp, string? error)
+    {
+        var info = new PostPasteInfo(pasted, targetApp, error);
+        _dispatcher.BeginInvoke(new Action(() =>
+        {
+            _state.OnNext(new CoordinatorSnapshot(AppState.Idle, PostPaste: info));
+        }));
+    }
+
     private async Task HandleFailureAsync(string error, string? failedWavPath)
     {
         _logger.LogWarning("Transcription failed: {Error}", error);
+
+        EmitPostPasteSnapshot(pasted: false, targetApp: "?", error: error);
 
         string? retainedPath = null;
         if (failedWavPath is not null && File.Exists(failedWavPath))

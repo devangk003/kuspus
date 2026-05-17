@@ -31,8 +31,14 @@ namespace KusPus.Native;
 /// See CLAUDE.md deviation log.
 ///
 /// LWin-suppression: when the user releases LWin while we own the chord, Windows
-/// would normally open the Start menu. We inject a stray <c>VK_CONTROL</c> keydown
-/// just before consuming the LWin keyup. Textbook hotkey-utility idiom.
+/// would normally open the Start menu. We inject a stray Ctrl tap right before the
+/// LWin keyup so the OS sees "other input between LWin↓ and LWin↑" and skips the
+/// Start menu — this is AutoHotkey's <c>#MenuMaskKey</c> idiom. We do NOT consume
+/// the LWin keyup itself: the OS must see it so its internal "Win is held" state
+/// clears. Consuming it (the original §13 phrasing) left Win stuck-down, which made
+/// subsequent <c>SendInput(Ctrl+V)</c> read as <c>Win+Ctrl+V</c> (opens Action
+/// Center / Clipboard History) and turned every later keystroke into a Win+key
+/// system shortcut.
 ///
 /// Hook self-heal watchdog (TECH_SPEC §13) is NOT implemented in Phase 5. Deferred.
 /// </summary>
@@ -264,13 +270,18 @@ public sealed class HotkeyEngine : IHotkeyEngine, IDisposable
                 _chordEngaged = false;
                 (toEmit ??= []).Add(new ChordReleased());
 
-                // LWin-suppression: if the chord just disengaged because the user
-                // released a Windows key, inject a stray Ctrl tap and consume the
-                // keyup so Windows doesn't open the Start menu.
+                // LWin-suppression (menu-mask-key idiom, AHK #MenuMaskKey): if the
+                // chord just disengaged because the user released a Windows key,
+                // inject a stray Ctrl tap so Windows sees "other input between
+                // LWin↓ and LWin↑" and skips the Start menu. The LWin keyup itself
+                // is NOT consumed — the OS needs to see it so its internal "Win is
+                // held" state clears. Otherwise Win stays stuck-down in OS state
+                // and the next SendInput(Ctrl+V) reads as Win+Ctrl+V (opens Action
+                // Center / Clipboard History) and every subsequent keystroke
+                // becomes a Win+key system shortcut.
                 if (isKeyUp && (key == CoreVK.LeftWin || key == CoreVK.RightWin))
                 {
                     InjectControlTap();
-                    consume = true;
                 }
             }
             else if (engaged && isKeyDown && !isChordModifier && !isChordKey)

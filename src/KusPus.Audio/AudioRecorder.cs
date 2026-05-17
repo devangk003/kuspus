@@ -61,6 +61,11 @@ public sealed class AudioRecorder : IAudioRecorder, IDisposable
     private long _samplesWritten;
     private volatile bool _isRecording;
     private volatile bool _hitDurationCap;
+    // Preferred input device id pushed from settings (null = follow OS default).
+    // Volatile because the composition root may write this from a different thread
+    // than the StartAsync caller, and we want StartAsync to read the most-recently-
+    // committed value without locking.
+    private volatile string? _preferredDeviceId;
 
     public AudioRecorder(string? tempDir = null, ILogger<AudioRecorder>? logger = null)
     {
@@ -71,6 +76,8 @@ public sealed class AudioRecorder : IAudioRecorder, IDisposable
     public IObservable<float[]> Levels => _levels;
 
     public event EventHandler? DefaultDeviceChanged;
+
+    public void SetInputDeviceId(string? deviceId) => _preferredDeviceId = deviceId;
 
     public Task<Result<RecordingHandle>> StartAsync(CancellationToken ct = default)
     {
@@ -84,7 +91,7 @@ public sealed class AudioRecorder : IAudioRecorder, IDisposable
             try
             {
                 _enumerator = new MMDeviceEnumerator();
-                using var device = _enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Console);
+                using var device = ResolveCaptureDevice(_enumerator, _preferredDeviceId);
 
                 _capture = new WasapiCapture(device, useEventSync: false);
                 _buffer = new BufferedWaveProvider(_capture.WaveFormat)
@@ -221,6 +228,36 @@ public sealed class AudioRecorder : IAudioRecorder, IDisposable
     }
 
     // ── private ──────────────────────────────────────────────────────────────
+
+    // Picks the capture device for this recording session. If a preferred id is
+    // set and matches a currently-present active device, use it; otherwise fall
+    // back to the OS default. Fallback is silent on first use, logged on later
+    // calls (the device may have been unplugged between settings save and now).
+    private MMDevice ResolveCaptureDevice(MMDeviceEnumerator enumerator, string? preferredId)
+    {
+        if (!string.IsNullOrEmpty(preferredId))
+        {
+            try
+            {
+                var device = enumerator.GetDevice(preferredId);
+                if (device is not null && device.State == DeviceState.Active && device.DataFlow == DataFlow.Capture)
+                {
+                    return device;
+                }
+                device?.Dispose();
+                _logger.LogWarning(
+                    "Preferred input device {Id} not active/capture; falling back to OS default.",
+                    preferredId);
+            }
+            catch (COMException ex)
+            {
+                _logger.LogWarning(ex,
+                    "Preferred input device {Id} could not be resolved; falling back to OS default.",
+                    preferredId);
+            }
+        }
+        return enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Console);
+    }
 
     private void OnDataAvailable(object? sender, WaveInEventArgs e)
     {
