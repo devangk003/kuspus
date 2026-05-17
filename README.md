@@ -3,7 +3,7 @@
 
   # KusPus
 
-  > Local-only voice-to-text for Windows. Press a hotkey, speak, paste anywhere.
+  > Local-only voice-to-text for Windows. Privacy-First.
 </div>
 
 KusPus is a floating, hotkey-driven dictation app for Windows. Hold **Left Ctrl + Left Win**, speak, release. The transcript pastes into whatever app you're in — terminal, browser, Slack, IDE, anywhere with a text field. Everything runs on your machine. No cloud, no account, no telemetry.
@@ -15,7 +15,7 @@ Built in C# + WPF on .NET 10 with [whisper.cpp](https://github.com/ggerganov/whi
 ## Quick start
 
 1. Download `KusPus-Setup-v1.0.0.exe` from [Releases](https://github.com/devangk003/kuspus/releases/latest).
-2. Right-click → Properties → tick **Unblock** → Apply. (Defangs SmartScreen — KusPus is unsigned by design.)
+2. Click Run Anyways (SmartScreen Alert — KusPus is unsigned by design.)
 3. Run the installer. No admin prompt. ~155 MB on disk; bundles `whisper.exe` + `tiny.en` model so first launch is fully offline.
 4. Hit **Left Ctrl + Left Win**, speak, release.
 
