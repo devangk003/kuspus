@@ -15,6 +15,22 @@
     <ApplicationIcon>..\..\icons\icon.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <!-- Phase 12 publish profile lives in Properties/PublishProfiles/win-x64.pubxml
+       so dev builds (`dotnet build`, `dotnet test`) stay lean. Publish via:
+         dotnet publish src/KusPus.App -p:PublishProfile=win-x64 -o publish/win-x64
+       Don't move those properties into this csproj — putting SelfContained=true
+       at the project level forces every `dotnet build` to materialise the
+       full self-contained 200+ MB runtime, slows CI, and breaks the smoke
+       PowerShell paths that point at bin\Debug\net10.0-windows\KusPus.exe. -->
+
+  <!-- Single-file analyzer hint: we publish single-file, so warn at BUILD time
+       on Assembly.Location / similar APIs that return empty in published apps.
+       Catches the IL3000 family early. Doesn't trigger the actual single-file
+       packaging — that only happens when the PublishProfile is invoked. -->
+  <PropertyGroup>
+    <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
     <PackageReference Include="H.NotifyIcon.Wpf" Version="2.0.131" />
