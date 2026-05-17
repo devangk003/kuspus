@@ -1,5 +1,21 @@
 # KusPus release — tag-triggered build of the unsigned installer.
-# Phase 12 — see TECH_SPEC §31, §32.
+# Phase 12 — see TECH_SPEC §31, §32. Validated against 2025 best-practices
+# research (2026-05-17).
+#
+# Flow on tag push (v*.*.*):
+#   1. Checkout (no submodules — whisper.cpp pulled prebuilt by step 4)
+#   2. Setup .NET 10
+#   3. Restore + run full test suite (release fails fast on a regression)
+#   4. Run tools/build-whisper-windows.ps1 → installer/payload/whisper/
+#   5. dotnet publish with PublishProfile=win-x64 → publish/win-x64/
+#      (self-contained single-file ~86 MB)
+#   6. Install Inno Setup 6.4.3 (windows-latest migrated to Server 2025 in
+#      Sept 2025 — Inno is no longer pre-installed; see
+#      actions/runner-images#12464)
+#   7. iscc.exe installer/KusPus.iss /DAppVersion=<tag> → installer/Output/
+#   8. softprops/action-gh-release publishes as DRAFT with auto-generated
+#      notes; you flip to published from the GitHub UI after smoke-testing
+#      the produced setup.exe on a clean machine.
 
 name: release
 
@@ -7,11 +23,113 @@ on:
   push:
     tags: ['v*']
 
+# A release is one-and-done; do NOT cancel-in-progress on tag pushes. If
+# you push two tags in quick succession, run them both.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write  # needed for action-gh-release to create the GitHub Release
+
 jobs:
-  placeholder:
+  release:
     runs-on: windows-latest
     steps:
-      - name: Not implemented
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: false  # whisper.cpp pulled prebuilt by step 4
+          fetch-depth: 0     # release notes generation reads full git log
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Build.props') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Test (full suite)
+        # Release builds run the full xunit suite first — a failing test
+        # on a tagged commit is a release-blocker. Use Release config so
+        # the test environment matches what the published binary uses.
+        run: dotnet test --configuration Release --no-restore
+
+      - name: Build whisper.exe payload (pinned upstream release)
+        # Downloads v1.8.4 (or whatever tools/build-whisper-windows.ps1
+        # has -Tag default) from ggerganov/whisper.cpp's GitHub release,
+        # extracts whisper.exe + DLLs + SHA256SUMS to installer/payload/whisper/.
+        shell: pwsh
+        run: ./tools/build-whisper-windows.ps1
+
+      - name: Publish KusPus.App (self-contained single-file)
+        # PublishProfile=win-x64 sets SelfContained, PublishSingleFile,
+        # IncludeNativeLibrariesForSelfExtract, EnableCompressionInSingleFile,
+        # PublishReadyToRun, PublishTrimmed=false, DebugType=embedded.
+        run: dotnet publish src/KusPus.App -p:PublishProfile=win-x64 -o publish/win-x64
+
+      - name: Build installer (install Inno + compile)
+        # As of the Sept 2025 windows-latest → Windows Server 2025 migration,
+        # Inno Setup is no longer pre-installed on GitHub-hosted runners
+        # (actions/runner-images#12464). This action both installs Inno 6
+        # AND runs ISCC.exe on the script — one step for two jobs.
+        # AppVersion via /DAppVersion= stamps the tag into both
+        # OutputBaseFilename (→ KusPus-Setup-v1.0.0.exe) and the .exe's
+        # version-info resource.
+        # /Qp = quiet output, errors only.
+        # TODO Phase 12+: pin to commit SHA + add Dependabot config so
+        # third-party actions auto-update. v1.2.5 was the latest as of
+        # 2026-05-17 research; current at run time may be newer.
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.5
+        with:
+          path: installer/KusPus.iss
+          options: /DAppVersion=${{ github.ref_name }} /Qp
+
+      - name: Verify installer artifact
+        # Belt-and-suspenders: confirm the .exe exists at the expected path
+        # before action-gh-release tries to upload it. fail_on_unmatched_files
+        # on the upload action would also catch this, but a named step gives
+        # a clearer log on failure.
         run: |
-          echo "release.yml not implemented yet (Phase 12)."
-          exit 1
+          $artifact = Get-ChildItem -Path installer/Output -Filter "KusPus-Setup-*.exe" | Select-Object -First 1
+          if (-not $artifact) { throw "No KusPus-Setup-*.exe in installer/Output/" }
+          $sizeMB = [math]::Round($artifact.Length / 1MB, 1)
+          $sha = (Get-FileHash -Algorithm SHA256 -LiteralPath $artifact.FullName).Hash
+          Write-Host "Artifact: $($artifact.Name) ($sizeMB MB)"
+          Write-Host "SHA-256:  $sha"
+        shell: pwsh
+
+      - name: Publish GitHub Release (draft)
+        # draft: true is intentional — the friends-only audience means the
+        # author smoke-tests the installer on a clean Windows VM before
+        # flipping the release from "draft" to "published" via the GitHub UI.
+        # Flipping draft = no extra workflow run, no rebuild.
+        # generate_release_notes auto-builds the notes from PRs + commits
+        # since the previous tag.
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer/Output/KusPus-Setup-*.exe
+          generate_release_notes: true
+          draft: true
+          fail_on_unmatched_files: true
+          name: KusPus ${{ github.ref_name }}
+          body: |
+            Local Privacy First. Windows dictation, fully on-device.
+
+            ## Install
+            1. Download `KusPus-Setup-${{ github.ref_name }}.exe`.
+            2. **Right-click → Properties → check "Unblock" → Apply** before running. This downgrades SmartScreen friction to a single "Run anyway" click.
+            3. Run the installer. No admin prompt — installs to `%LOCALAPPDATA%\Programs\KusPus`.
+            4. If Smart App Control is enabled (Win11), the installer will be silently blocked with no override UI. Disable SAC under Windows Security → App & browser control → Smart App Control → Off, then re-run.
+
+            ## Notes
+            See generated release notes below.
