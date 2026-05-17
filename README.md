@@ -10,7 +10,7 @@ KusPus is a floating, hotkey-driven dictation app for Windows. Hold **Left Ctrl 
 
 A from-scratch Windows rewrite of **WhisprFlow / FloatingRecorder** for macOS, built in C# + WPF on .NET 10, using [whisper.cpp](https://github.com/ggerganov/whisper.cpp) for transcription. CPU-only — no GPU required.
 
-**Status:** v1.0.0 release-candidate. Installer downloadable from [Releases](https://github.com/devangk003/kuspus/releases). See [docs/ROADMAP.md](docs/ROADMAP.md) for what's deferred to v1.1+.
+**Status:** v1.0.0 release-candidate. Installer downloadable from [Releases](https://github.com/devangk003/kuspus/releases).
 
 ---
 
@@ -61,7 +61,7 @@ KusPus is a single WPF process with five coordinated subsystems running through 
 
 Five threads (UI dispatcher, hook thread, audio capture, whisper subprocess, persistence task queue) coordinate through Rx subjects.
 
-Full architectural contract: [docs/TECH_SPEC.md](docs/TECH_SPEC.md). One-page summary: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+One-page summary: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Comparison
 
@@ -82,16 +82,9 @@ Benchmark methodology + reproducible scripts coming in v1.1.
 
 | Document | What's in it |
 |---|---|
-| [docs/PRD.md](docs/PRD.md) | Product requirements, scope, non-goals, decision register |
-| [docs/TECH_SPEC.md](docs/TECH_SPEC.md) | Architecture, threading model, FSM, native interop contracts |
-| [docs/APP_DESIGN.md](docs/APP_DESIGN.md) | Visual + interaction spec for every user-facing surface |
-| [docs/PILL_DESIGN.md](docs/PILL_DESIGN.md) | Pill-specific spec, motion model, hover-extend behaviour |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | What's deferred past v1.0, with promotion triggers |
-| [docs/PROCESS.md](docs/PROCESS.md) | Gate-driven development workflow used to build this |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | One-page architecture summary |
 | [docs/BUILD.md](docs/BUILD.md) | Developer setup |
 | [docs/INSTALL.md](docs/INSTALL.md) | End-user install guide + SmartScreen/SAC notes |
-| [docs/MANUAL_SMOKE.md](docs/MANUAL_SMOKE.md) | Manual milestone-gate test checklist |
 
 ## Privacy
 
@@ -102,7 +95,7 @@ KusPus runs entirely on your machine. Microphone audio, transcribed text, and cl
 
 Both are gated by an **Offline Mode** toggle in Preferences → Privacy. When ON, all `HttpClient` instances refuse non-allowlisted hosts via `EgressAllowlistHandler` — defense-in-depth even if the UI gating misfires.
 
-See [docs/PRD.md §10](docs/PRD.md) for the full privacy posture.
+Source code makes the posture verifiable: see `src/KusPus.App/EgressAllowlistHandler.cs` and `src/KusPus.Core/Telemetry/CrashScrubber.cs`.
 
 ## Built with
 

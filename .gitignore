@@ -68,3 +68,15 @@ secrets.json
 
 # Audio capture temp files (KUSPUS_TEMP_DIR target on space-constrained machines).
 .local-temp/
+
+# Private / internal docs — local-only, never tracked. README + LICENSE +
+# docs/BUILD.md, docs/INSTALL.md, docs/ARCHITECTURE.md are the public surface
+# (whitelisted below). Everything else under docs/ stays local.
+CLAUDE.md
+docs/*
+!docs/BUILD.md
+!docs/INSTALL.md
+!docs/ARCHITECTURE.md
+
+# Stray icon file from a one-off design iteration (kept locally only).
+icons/icon 2.svg
