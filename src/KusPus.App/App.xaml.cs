@@ -123,6 +123,14 @@ public partial class App : System.Windows.Application
         audioRecorder.SetInputDeviceId(prefsStore.Current.Audio.InputDeviceId);
         prefsStore.Changes.Subscribe(s => audioRecorder.SetInputDeviceId(s.Audio.InputDeviceId));
 
+        // Pill's dock mic-chooser needs to read the device list + write the
+        // selection without taking a Persistence dependency. Two tiny adapter
+        // bridges close the loop. PrefsStore lives in this method's scope so
+        // the bridge captures it.
+        _pill.SetBridges(
+            prefs: new PrefsStoreBridge(prefsStore),
+            audio: new AudioDeviceBridge());
+
         _tray = new TrayManager(
             _coordinator,
             onPreferences: () => _mainWindow.ShowOn("general"),
@@ -221,6 +229,56 @@ public partial class App : System.Windows.Application
             sp.GetRequiredService<IPrefsStore>(),
             WpfApplication.Current.Dispatcher,
             sp.GetService<ILogger<AppCoordinator>>()));
+    }
+
+    // ── Pill bridges ───────────────────────────────────────────────────────
+    // The pill window needs read/write access to PrefsStore.Audio.InputDeviceId
+    // and an enumeration of capture devices. Rather than make the pill depend
+    // on KusPus.Persistence + NAudio, the App-layer composition root wires
+    // these tiny adapter bridges. The pill defines the interfaces; App
+    // implements them. Same pattern as IClipboardWriter in KusPus.Native.
+
+    private sealed class PrefsStoreBridge : FloatingPillWindow.IPrefsStoreBridge
+    {
+        private readonly IPrefsStore _prefs;
+        public PrefsStoreBridge(IPrefsStore prefs) => _prefs = prefs;
+        public string? CurrentInputDeviceId => _prefs.Current.Audio.InputDeviceId;
+        public Task SetInputDeviceIdAsync(string? id)
+        {
+            var current = _prefs.Current;
+            if (current.Audio.InputDeviceId == id)
+            {
+                return Task.CompletedTask;
+            }
+            var next = current with { Audio = current.Audio with { InputDeviceId = id } };
+            return _prefs.SaveAsync(next);
+        }
+    }
+
+    private sealed class AudioDeviceBridge : FloatingPillWindow.IAudioRecorderBridge
+    {
+        public IReadOnlyList<(string Id, string Name)> EnumerateInputDevices()
+        {
+            var result = new List<(string Id, string Name)>();
+            try
+            {
+                using var enumerator = new NAudio.CoreAudioApi.MMDeviceEnumerator();
+                var devices = enumerator.EnumerateAudioEndPoints(
+                    NAudio.CoreAudioApi.DataFlow.Capture,
+                    NAudio.CoreAudioApi.DeviceState.Active);
+                foreach (var d in devices)
+                {
+                    result.Add((d.ID, d.FriendlyName ?? "(unknown device)"));
+                    d.Dispose();
+                }
+            }
+            catch (System.Runtime.InteropServices.COMException)
+            {
+                // No mics / driver issue — return empty list, pill shows just
+                // "Default device" in the chooser.
+            }
+            return result;
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)

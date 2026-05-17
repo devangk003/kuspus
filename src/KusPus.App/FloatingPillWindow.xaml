@@ -12,7 +12,8 @@
         ShowActivated="False"
         Focusable="False"
         Width="200" Height="56"
-        MinWidth="200" MaxWidth="280"
+        MinWidth="200" MaxWidth="320"
+        MinHeight="56" MaxHeight="78"
         ResizeMode="NoResize"
         UseLayoutRounding="True"
         SnapsToDevicePixels="True"
@@ -20,38 +21,49 @@
         MouseEnter="OnPillMouseEnter"
         MouseLeave="OnPillMouseLeave">
     <!--
-        Pill surface per docs/PILL_DESIGN.md.
-            200×56, 8px rounded corners. Mica on Win11 (DWMWA_SYSTEMBACKDROP_TYPE).
-            Surface gradient, border, text & visualizer all bind to ThemeTokens
-            via {DynamicResource}, so flipping Auto/Light/Dark in Preferences
-            re-themes the pill in lock-step with the MainWindow.
-            §10 hover-extend override: width animates 200→280 on hover, revealing
-              two icon buttons (Settings placeholder + Close) on the right.
+        Pill surface per docs/PILL_DESIGN.md (Phase 1 of the Organic Pill redesign).
+            Geometry: 200×56 collapsed, 320×78 expanded (pill + 22 px dock peek).
+                      Window grows dynamically on hover so Mica stays tight to
+                      the visible chrome (no rectangular Mica frame artifact
+                      around the pill).
+            Mica on Win11 (DWMWA_SYSTEMBACKDROP_TYPE).
+            All colours bind to ThemeTokens via {DynamicResource}.
+            On hover:
+              - Width animates 200→320, Height animates 56→78
+              - Pin + Magic-wand top-right buttons fade in (Pin rotates -12°→0°)
+              - DockDrawer slides up from behind + fades in (22 px peek)
+            On Pin click (toggle):
+              - Dock stays open + Pin stays visible after cursor leaves
+              - Pin glyph + button bg tint to mint
+        Halo / personality animations / idle-on-hover visualizer arrive in
+        Phases 2-4. This phase only restructures the chrome.
     -->
-    <Border x:Name="PillSurface" CornerRadius="8"
-            Background="{DynamicResource PillSurface}"
-            BorderBrush="{DynamicResource PillBorder}"
-            BorderThickness="1"
-            MouseLeftButtonDown="OnPillMouseLeftButtonDown">
-        <Border.Effect>
-            <!-- §3.3 dark shadow — kept black in both themes; barely visible behind
-                 a light pill anyway. -->
-            <DropShadowEffect Color="Black" Direction="270"
-                              ShadowDepth="2" BlurRadius="32" Opacity="0.45"/>
-        </Border.Effect>
+    <Grid x:Name="Root">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="56"/>
+            <RowDefinition Height="22"/>
+        </Grid.RowDefinitions>
 
-        <Grid ClipToBounds="True">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="200"/>
-                <ColumnDefinition Width="80"/>
-            </Grid.ColumnDefinitions>
+        <!-- ── PILL SURFACE (row 0) ───────────────────────────────────────── -->
+        <Border x:Name="PillSurface"
+                Grid.Row="0"
+                CornerRadius="8"
+                Background="{DynamicResource PillSurface}"
+                BorderBrush="{DynamicResource PillBorder}"
+                BorderThickness="1"
+                MouseLeftButtonDown="OnPillMouseLeftButtonDown">
+            <Border.Effect>
+                <!-- Kept black drop-shadow in both themes; barely visible behind
+                     a light pill anyway. -->
+                <DropShadowEffect Color="Black" Direction="270"
+                                  ShadowDepth="2" BlurRadius="32" Opacity="0.45"/>
+            </Border.Effect>
 
-            <Rectangle Grid.ColumnSpan="2"
-                       VerticalAlignment="Top"
-                       Height="1"
-                       Fill="{DynamicResource PillInnerHighlight}"/>
+            <Grid ClipToBounds="True">
+                <Rectangle VerticalAlignment="Top"
+                           Height="1"
+                           Fill="{DynamicResource PillInnerHighlight}"/>
 
-            <Grid Grid.Column="0">
                 <Rectangle x:Name="AccentLine"
                            VerticalAlignment="Top"
                            HorizontalAlignment="Center"
@@ -71,6 +83,8 @@
                     </Rectangle.Effect>
                 </Rectangle>
 
+                <!-- Content states (unchanged from previous design — visualizer-
+                     on-hover is Phase 2). -->
                 <StackPanel x:Name="IdleContent"
                             Orientation="Horizontal"
                             HorizontalAlignment="Center"
@@ -180,17 +194,225 @@
                                TextTrimming="CharacterEllipsis"
                                MaxWidth="120"/>
                 </StackPanel>
-            </Grid>
 
-            <StackPanel x:Name="ButtonPanel"
+                <!-- ── PIN + MAGIC-WAND BUTTONS (top-right corner) ─────────── -->
+                <!-- 18×18 each, 4 px gap, ~5 px inset from top-right edge.
+                     Hidden by default (Opacity=0); fade in on pill hover.
+                     Pin gets a -12° rotation at rest, animates to 0° on hover. -->
+                <StackPanel x:Name="CornerButtons"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Top"
+                            Margin="0,5,5,0"
+                            Opacity="0"
+                            IsHitTestVisible="False">
+                    <!-- Magic wand — left of Pin (Pin should be the rightmost
+                         since spec says "top-right corner"). DORMANT — no click. -->
+                    <Button x:Name="MagicWandButton"
+                            Width="18" Height="18"
+                            Margin="0,0,4,0"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Cursor="Hand"
+                            ToolTip="Refine text">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="bg"
+                                        Background="{TemplateBinding Background}"
+                                        CornerRadius="4">
+                                    <ContentPresenter HorizontalAlignment="Center"
+                                                      VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="bg" Property="Background" Value="{DynamicResource ButtonHoverBg}"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                        <TextBlock Text="&#xE945;"
+                                   FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                   FontSize="11"
+                                   Foreground="{DynamicResource SecondaryText}"/>
+                    </Button>
+
+                    <!-- Pin — top-right. Rotates -12° at rest, 0° on hover. -->
+                    <Button x:Name="PinButton"
+                            Width="18" Height="18"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Cursor="Hand"
+                            ToolTip="Pin (keep open)"
+                            Click="OnPinClick"
+                            RenderTransformOrigin="0.5,0.5">
+                        <Button.RenderTransform>
+                            <RotateTransform x:Name="PinRotation" Angle="-12"/>
+                        </Button.RenderTransform>
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="bg"
+                                        Background="{TemplateBinding Background}"
+                                        CornerRadius="4">
+                                    <ContentPresenter HorizontalAlignment="Center"
+                                                      VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="bg" Property="Background" Value="{DynamicResource ButtonHoverBg}"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                        <TextBlock x:Name="PinGlyph"
+                                   Text="&#xE718;"
+                                   FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                   FontSize="11"
+                                   Foreground="{DynamicResource SecondaryText}"/>
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ── DOCK DRAWER (row 1) ────────────────────────────────────────── -->
+        <!-- Sits flush against the bottom of the pill. Hidden by default (slides
+             up behind the pill + fades out). On hover (or pinned): slides down
+             + fades in. Background matches the pill's translucent surface so
+             it reads as one continuous chrome. -->
+        <Border x:Name="DockDrawer"
+                Grid.Row="1"
+                Background="{DynamicResource PillSurface}"
+                BorderBrush="{DynamicResource PillBorder}"
+                BorderThickness="1,0,1,1"
+                CornerRadius="0,0,8,8"
+                Opacity="0"
+                IsHitTestVisible="False"
+                RenderTransformOrigin="0.5,0">
+            <Border.RenderTransform>
+                <TranslateTransform x:Name="DockTransform" Y="-22"/>
+            </Border.RenderTransform>
+            <Grid Margin="6,0,6,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Record toggle (Phase 1: visible-but-stubbed). Red dot when
+                     idle, red square when recording. Mint tint on active. -->
+                <Button x:Name="RecordButton"
+                        Grid.Column="0"
+                        Width="22" Height="18"
+                        Margin="0,0,4,0"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Cursor="Hand"
+                        ToolTip="Toggle recording (not yet wired)"
+                        Click="OnRecordToggleClick">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="bg"
+                                    Background="{TemplateBinding Background}"
+                                    CornerRadius="5">
+                                <ContentPresenter HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="bg" Property="Background" Value="{DynamicResource ButtonHoverBg}"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                    <Ellipse x:Name="RecordGlyph"
+                             Width="8" Height="8"
+                             Fill="#EF5350"/>
+                </Button>
+
+                <!-- Mic chooser — flex-grow. Tap opens a real popup picker
+                     (re-uses the Audio-tab device enumeration). -->
+                <Button x:Name="MicChooserButton"
                         Grid.Column="1"
-                        Orientation="Horizontal"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Center"
-                        Opacity="0"
-                        IsHitTestVisible="False">
+                        Background="{DynamicResource ButtonHoverBg}"
+                        BorderThickness="0"
+                        Padding="8,2"
+                        Margin="0,2,4,2"
+                        Cursor="Hand"
+                        HorizontalContentAlignment="Stretch"
+                        Click="OnMicChooserClick">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="bg"
+                                    Background="{TemplateBinding Background}"
+                                    CornerRadius="5"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Stretch"
+                                                  VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="bg" Property="Opacity" Value="1.4"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0"
+                                   Text="&#xE720;"
+                                   FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                   FontSize="10"
+                                   Foreground="{DynamicResource SecondaryText}"
+                                   VerticalAlignment="Center"/>
+                        <TextBlock x:Name="MicChooserLabel"
+                                   Grid.Column="1"
+                                   Text="Default device"
+                                   FontFamily="Segoe UI Variable Text, Segoe UI"
+                                   FontSize="10"
+                                   FontWeight="Medium"
+                                   Foreground="{DynamicResource PrimaryText}"
+                                   VerticalAlignment="Center"
+                                   Margin="6,0,0,0"
+                                   TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Grid.Column="2"
+                                   Text="&#xE70D;"
+                                   FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                   FontSize="8"
+                                   Foreground="{DynamicResource MutedText}"
+                                   VerticalAlignment="Center"
+                                   Margin="6,0,0,0"/>
+                    </Grid>
+                </Button>
+
+                <!-- Mic chooser popup — populated lazily on first open. -->
+                <Popup x:Name="MicChooserPopup"
+                       PlacementTarget="{Binding ElementName=MicChooserButton}"
+                       Placement="Top"
+                       StaysOpen="False"
+                       AllowsTransparency="True"
+                       PopupAnimation="Fade"
+                       VerticalOffset="-4"
+                       Closed="OnMicChooserPopupClosed">
+                    <Border Background="{DynamicResource Surface}"
+                            BorderBrush="{DynamicResource BorderStrong}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            MinWidth="220"
+                            MaxHeight="240">
+                        <ScrollViewer>
+                            <StackPanel x:Name="MicChooserList"/>
+                        </ScrollViewer>
+                    </Border>
+                </Popup>
+
+                <!-- Settings — opens Preferences. -->
                 <Button x:Name="SettingsButton"
-                        Width="28" Height="28"
+                        Grid.Column="2"
+                        Width="22" Height="18"
                         Margin="0,0,4,0"
                         Background="Transparent"
                         BorderThickness="0"
@@ -201,7 +423,7 @@
                         <ControlTemplate TargetType="Button">
                             <Border x:Name="bg"
                                     Background="{TemplateBinding Background}"
-                                    CornerRadius="6">
+                                    CornerRadius="5">
                                 <ContentPresenter HorizontalAlignment="Center"
                                                   VerticalAlignment="Center"/>
                             </Border>
@@ -214,12 +436,14 @@
                     </Button.Template>
                     <TextBlock Text="&#xE713;"
                                FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
-                               FontSize="14"
+                               FontSize="11"
                                Foreground="{DynamicResource SecondaryText}"/>
                 </Button>
 
+                <!-- Dismiss — fully closes the pill (Shutdown). -->
                 <Button x:Name="CloseButton"
-                        Width="28" Height="28"
+                        Grid.Column="3"
+                        Width="22" Height="18"
                         Background="Transparent"
                         BorderThickness="0"
                         Cursor="Hand"
@@ -229,7 +453,7 @@
                         <ControlTemplate TargetType="Button">
                             <Border x:Name="bg"
                                     Background="{TemplateBinding Background}"
-                                    CornerRadius="6">
+                                    CornerRadius="5">
                                 <ContentPresenter HorizontalAlignment="Center"
                                                   VerticalAlignment="Center"/>
                             </Border>
@@ -242,10 +466,10 @@
                     </Button.Template>
                     <TextBlock Text="&#xE8BB;"
                                FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
-                               FontSize="11"
+                               FontSize="10"
                                Foreground="{DynamicResource PrimaryText}"/>
                 </Button>
-            </StackPanel>
-        </Grid>
-    </Border>
+            </Grid>
+        </Border>
+    </Grid>
 </Window>

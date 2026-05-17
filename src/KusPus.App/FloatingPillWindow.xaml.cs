@@ -1,6 +1,8 @@
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Forms;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -767,41 +769,250 @@ public partial class FloatingPillWindow : Window
         return GetMonitorInfoExW(hMon, ref miEx) ? miEx.szDevice : null;
     }
 
-    // ── Hover-extend (§10) ──────────────────────────────────────────────────
+    // ── Hover-expand + dock drawer (PILL_DESIGN Phase 1 redesign) ─────────
+    //
+    // On pointer enter (or while pinned): pill widens 200→320, window grows
+    // 56→78 tall to accommodate the 22 px dock peek, dock slides down + fades
+    // in, Pin + Magic-wand corner buttons fade in (Pin de-rotates -12°→0°).
+    //
+    // On pointer leave: reverses — but stays open if pinned.
+    //
+    // Pin click latches "always open" — dock + corner buttons stay visible
+    // after the cursor leaves until the user clicks Pin again.
+
+    private static readonly Duration DockSlideIn = new(TimeSpan.FromMilliseconds(240));
+    private static readonly Duration DockSlideOut = new(TimeSpan.FromMilliseconds(160));
+    private static readonly Duration PinFade = new(TimeSpan.FromMilliseconds(180));
+    private static readonly Duration PinRotate = new(TimeSpan.FromMilliseconds(220));
+
+    private bool _isPinned;
+    private IPrefsStoreBridge? _prefsBridge;
+    private IAudioRecorderBridge? _audioBridge;
+
+    // Composition root injects these tiny bridges so the pill can read the
+    // current device list + active selection without taking a hard dependency
+    // on KusPus.Persistence / KusPus.Audio types. Keeps the assembly graph
+    // unchanged (App is the only consumer that knows both layers).
+    public interface IPrefsStoreBridge
+    {
+        string? CurrentInputDeviceId { get; }
+        Task SetInputDeviceIdAsync(string? id);
+    }
+    public interface IAudioRecorderBridge
+    {
+        IReadOnlyList<(string Id, string Name)> EnumerateInputDevices();
+    }
+    public void SetBridges(IPrefsStoreBridge prefs, IAudioRecorderBridge audio)
+    {
+        _prefsBridge = prefs;
+        _audioBridge = audio;
+        UpdateMicChooserLabel();
+    }
 
     private void OnPillMouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
     {
-        AnimateWidth(280);
-        AnimateButtonPanel(visible: true);
+        OpenDock();
     }
 
     private void OnPillMouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
     {
-        AnimateWidth(200);
-        AnimateButtonPanel(visible: false);
+        if (_isPinned)
+        {
+            return;
+        }
+        CloseDock();
     }
 
-    private void AnimateWidth(double to)
+    private void OpenDock()
     {
-        var anim = new DoubleAnimation
-        {
-            To = to,
-            Duration = HoverExtendDuration,
-            EasingFunction = new CubicEase { EasingMode = to > Width ? EasingMode.EaseOut : EasingMode.EaseIn },
-        };
-        BeginAnimation(WidthProperty, anim);
+        AnimateWindowSize(width: 320, height: 78, dockShowing: true);
+        AnimateDockDrawer(visible: true);
+        AnimateCornerButtons(visible: true);
     }
 
-    private void AnimateButtonPanel(bool visible)
+    private void CloseDock()
     {
-        ButtonPanel.IsHitTestVisible = visible;
-        var anim = new DoubleAnimation
+        AnimateWindowSize(width: 200, height: 56, dockShowing: false);
+        AnimateDockDrawer(visible: false);
+        AnimateCornerButtons(visible: false);
+    }
+
+    private void AnimateWindowSize(double width, double height, bool dockShowing)
+    {
+        // Animate both Width and Height so Mica stays tight to the visible
+        // chrome and the window doesn't briefly clip the dock during the slide.
+        var ease = new CubicEase { EasingMode = dockShowing ? EasingMode.EaseOut : EasingMode.EaseIn };
+        var dur = dockShowing ? DockSlideIn : DockSlideOut;
+        BeginAnimation(WidthProperty, new DoubleAnimation { To = width, Duration = dur, EasingFunction = ease });
+        BeginAnimation(HeightProperty, new DoubleAnimation { To = height, Duration = dur, EasingFunction = ease });
+    }
+
+    private void AnimateDockDrawer(bool visible)
+    {
+        DockDrawer.IsHitTestVisible = visible;
+        var ease = new CubicEase { EasingMode = visible ? EasingMode.EaseOut : EasingMode.EaseIn };
+        var dur = visible ? DockSlideIn : DockSlideOut;
+        DockDrawer.BeginAnimation(OpacityProperty,
+            new DoubleAnimation { To = visible ? 1.0 : 0.0, Duration = dur, EasingFunction = ease });
+        DockTransform.BeginAnimation(TranslateTransform.YProperty,
+            new DoubleAnimation { To = visible ? 0.0 : -22.0, Duration = dur, EasingFunction = ease });
+    }
+
+    private void AnimateCornerButtons(bool visible)
+    {
+        CornerButtons.IsHitTestVisible = visible;
+        var ease = new CubicEase { EasingMode = visible ? EasingMode.EaseOut : EasingMode.EaseIn };
+        CornerButtons.BeginAnimation(OpacityProperty,
+            new DoubleAnimation { To = visible ? 1.0 : 0.0, Duration = PinFade, EasingFunction = ease });
+        // Pin un-rotates on hover-in, rotates back to -12° on hover-out (unless pinned).
+        double targetAngle = (visible || _isPinned) ? 0.0 : -12.0;
+        PinRotation.BeginAnimation(RotateTransform.AngleProperty,
+            new DoubleAnimation { To = targetAngle, Duration = PinRotate,
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+    }
+
+    // ── Corner-button + dock-button handlers ──────────────────────────────
+
+    private void OnPinClick(object sender, RoutedEventArgs e)
+    {
+        _isPinned = !_isPinned;
+#pragma warning disable CA1848, CA1873
+        _logger.LogDebug("Pin toggled → {Pinned}.", _isPinned);
+#pragma warning restore CA1848, CA1873
+        // Mint tint glyph + bg when pinned.
+        PinGlyph.SetResourceReference(TextBlock.ForegroundProperty,
+            _isPinned ? "Mint" : "SecondaryText");
+        if (_isPinned)
         {
-            To = visible ? 1.0 : 0.0,
-            Duration = HoverExtendDuration,
-            EasingFunction = new CubicEase { EasingMode = visible ? EasingMode.EaseOut : EasingMode.EaseIn },
+            // Latched open — make sure dock + corners are showing regardless of hover.
+            OpenDock();
+        }
+        // If just un-pinned and cursor isn't over the window, close the dock.
+        else if (!IsMouseOver)
+        {
+            CloseDock();
+        }
+    }
+
+    private void OnRecordToggleClick(object sender, RoutedEventArgs e)
+    {
+        // TODO Phase X: wire to AppCoordinator's tap-mode-recording API once it
+        // exists. For now this is a visible affordance with no behavior — the
+        // hotkey chord remains the canonical way to start dictation.
+#pragma warning disable CA1848, CA1873
+        _logger.LogDebug("Record toggle clicked — not yet wired to AppCoordinator.");
+#pragma warning restore CA1848, CA1873
+    }
+
+    private void OnMicChooserClick(object sender, RoutedEventArgs e)
+    {
+        if (_audioBridge is null || _prefsBridge is null)
+        {
+            return;
+        }
+        BuildMicChooserList();
+        MicChooserPopup.IsOpen = true;
+    }
+
+    private void OnMicChooserPopupClosed(object? sender, EventArgs e)
+    {
+        // Refresh the chooser button label to reflect any new selection.
+        UpdateMicChooserLabel();
+    }
+
+    private void BuildMicChooserList()
+    {
+        if (_audioBridge is null || _prefsBridge is null)
+        {
+            return;
+        }
+        MicChooserList.Children.Clear();
+        var devices = _audioBridge.EnumerateInputDevices();
+        var currentId = _prefsBridge.CurrentInputDeviceId;
+
+        MicChooserList.Children.Add(BuildMicChooserItem(
+            id: null,
+            label: "Default device (follows Windows)",
+            isSelected: string.IsNullOrEmpty(currentId)));
+
+        foreach (var d in devices)
+        {
+            MicChooserList.Children.Add(BuildMicChooserItem(
+                id: d.Id,
+                label: d.Name,
+                isSelected: string.Equals(d.Id, currentId, StringComparison.Ordinal)));
+        }
+    }
+
+    private System.Windows.Controls.Button BuildMicChooserItem(string? id, string label, bool isSelected)
+    {
+        var btn = new System.Windows.Controls.Button
+        {
+            Background = isSelected
+                ? (System.Windows.Media.Brush)System.Windows.Application.Current.FindResource("MintTint")
+                : System.Windows.Media.Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(10, 7, 10, 7),
+            HorizontalContentAlignment = System.Windows.HorizontalAlignment.Stretch,
+            Cursor = System.Windows.Input.Cursors.Hand,
+            Tag = id,
+            Content = new TextBlock
+            {
+                Text = label,
+                FontFamily = new System.Windows.Media.FontFamily("Segoe UI Variable Text, Segoe UI"),
+                FontSize = 12,
+                FontWeight = FontWeights.Medium,
+                Foreground = (System.Windows.Media.Brush)System.Windows.Application.Current.FindResource("PrimaryText"),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            },
         };
-        ButtonPanel.BeginAnimation(OpacityProperty, anim);
+        btn.Template = BuildMicChooserItemTemplate();
+        btn.Click += async (_, _) =>
+        {
+            if (_prefsBridge is null)
+            {
+                return;
+            }
+            await _prefsBridge.SetInputDeviceIdAsync(id).ConfigureAwait(true);
+            MicChooserPopup.IsOpen = false;
+        };
+        return btn;
+    }
+
+    private static ControlTemplate BuildMicChooserItemTemplate()
+    {
+        // Plain rounded background + hover tint, no chrome.
+        var template = new ControlTemplate(typeof(System.Windows.Controls.Button));
+        var border = new FrameworkElementFactory(typeof(Border));
+        border.SetValue(Border.CornerRadiusProperty, new CornerRadius(4));
+        border.SetBinding(Border.BackgroundProperty,
+            new System.Windows.Data.Binding("Background")
+            {
+                RelativeSource = new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.TemplatedParent),
+            });
+        var content = new FrameworkElementFactory(typeof(ContentPresenter));
+        content.SetValue(ContentPresenter.HorizontalAlignmentProperty, System.Windows.HorizontalAlignment.Stretch);
+        content.SetValue(ContentPresenter.VerticalAlignmentProperty, System.Windows.VerticalAlignment.Center);
+        border.AppendChild(content);
+        template.VisualTree = border;
+        return template;
+    }
+
+    private void UpdateMicChooserLabel()
+    {
+        if (_prefsBridge is null || _audioBridge is null)
+        {
+            return;
+        }
+        var currentId = _prefsBridge.CurrentInputDeviceId;
+        if (string.IsNullOrEmpty(currentId))
+        {
+            MicChooserLabel.Text = "Default device";
+            return;
+        }
+        var devices = _audioBridge.EnumerateInputDevices();
+        var match = devices.FirstOrDefault(d => string.Equals(d.Id, currentId, StringComparison.Ordinal));
+        MicChooserLabel.Text = match.Name ?? "Default device";
     }
 
     private void OnCloseClick(object sender, RoutedEventArgs e)
