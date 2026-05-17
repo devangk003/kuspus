@@ -229,17 +229,26 @@ public partial class App : System.Windows.Application
         base.OnExit(e);
     }
 
+    // Unhandled-exception handlers per TECH_SPEC §10.4. Each one (a) writes a
+    // Serilog record for the local %LOCALAPPDATA%\KusPus\logs file, then
+    // (b) forwards to Sentry IF the user has opted in — gated on
+    // _crashReporter?.IsActive so we don't call into a Sentry SDK that's been
+    // torn down by a privacy-toggle flip.
+
     private void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
     {
-        if (e.ExceptionObject is Exception ex)
+        if (e.ExceptionObject is not Exception ex)
         {
-            _log?.LogCritical(ex, "Unhandled AppDomain exception.");
+            return;
         }
+        _log?.LogCritical(ex, "Unhandled AppDomain exception.");
+        TryReportToSentry(ex);
     }
 
     private void OnDispatcherUnhandled(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         _log?.LogCritical(e.Exception, "Unhandled dispatcher exception.");
+        TryReportToSentry(e.Exception);
         // Don't crash the app on a UI-thread exception in v1; log and swallow.
         e.Handled = true;
     }
@@ -247,6 +256,25 @@ public partial class App : System.Windows.Application
     private void OnUnobservedTask(object? sender, UnobservedTaskExceptionEventArgs e)
     {
         _log?.LogWarning(e.Exception, "Unobserved task exception.");
+        TryReportToSentry(e.Exception);
         e.SetObserved();
+    }
+
+    private void TryReportToSentry(Exception ex)
+    {
+        if (_crashReporter?.IsActive != true)
+        {
+            return;
+        }
+        try
+        {
+            Sentry.SentrySdk.CaptureException(ex);
+        }
+        catch (Exception sentryEx)
+        {
+            // Never let a Sentry failure escalate into a recursive unhandled
+            // exception — log and move on.
+            _log?.LogWarning(sentryEx, "Sentry CaptureException failed.");
+        }
     }
 }
