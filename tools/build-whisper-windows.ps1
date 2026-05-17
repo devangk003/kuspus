@@ -1,149 +1,165 @@
 <#
 .SYNOPSIS
-Build whisper.cpp for KusPus (Windows, x64, MSVC, CPU only).
+Populate installer/payload/whisper/ with whisper.exe + DLLs from a pinned
+whisper.cpp GitHub release.
 
 .DESCRIPTION
-Produces installer/payload/whisper/{whisper.exe, *.dll} from the pinned
-third_party/whisper.cpp submodule. See TECH_SPEC §29.
+Phase 12 — see TECH_SPEC §29. Downloads `whisper-bin-x64.zip` from the
+ggerganov/whisper.cpp release for $Tag, extracts to a tag-scoped cache,
+copies whisper-cli.exe (renamed to whisper.exe) + all runtime DLLs into
+installer/payload/whisper/, generates SHA256SUMS, and smoke-tests the
+binary.
 
-Requirements:
-- Visual Studio 2022 (Community is fine) or VS Build Tools 14.40+ with the
-  "Desktop development with C++" workload.
-- CMake 3.28+ on PATH.
-- third_party/whisper.cpp checked out (git submodule update --init --recursive).
+Build-from-source via the third_party/whisper.cpp submodule was the
+original plan (and lives in git history at the prior version of this
+file). The dogfood team picked download-prebuilt for v1.0 because:
+  - No local MSVC + CMake toolchain required on dev machines or CI
+  - Faster turnaround (a few seconds vs several minutes)
+  - Upstream binaries are GGML_NATIVE=OFF (portable x86-64-v2) by default
 
-GGML_NATIVE=OFF is mandatory: builds for portable x86-64-v2, not the build
-machine's specific CPU. Skipping this would ship a binary that crashes on
-older CPUs.
+Idempotent: re-running with the same -Tag is a no-op unless -Force is
+passed (we write a .tag marker into the payload dir to detect prior runs).
+
+.PARAMETER Tag
+whisper.cpp release tag (e.g. "v1.8.4"). Defaults to the version pinned
+for KusPus v1.0. Override to test newer releases.
+
+.PARAMETER Force
+Re-download + re-extract even if the payload is already at $Tag.
 #>
 
 [CmdletBinding()]
 param(
-    [string]$Configuration = 'Release',
-    [switch]$Clean
+    [string]$Tag = 'v1.8.4',
+    [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
-$repoRoot     = Split-Path $PSScriptRoot -Parent
-$whisperSrc   = Join-Path $repoRoot 'third_party\whisper.cpp'
-$whisperBuild = Join-Path $whisperSrc 'build'
-$payload      = Join-Path $repoRoot 'installer\payload\whisper'
+$repoRoot = Split-Path $PSScriptRoot -Parent
+$payload  = Join-Path $repoRoot 'installer\payload\whisper'
+$cacheDir = Join-Path $repoRoot '.local-temp\whisper-cache'
 
 function Write-Step($message) {
     Write-Host "==> $message" -ForegroundColor Cyan
 }
 
-# ── 1. Sanity checks ─────────────────────────────────────────────────────────
-if (-not (Test-Path $whisperSrc -PathType Container)) {
-    throw "Submodule missing at $whisperSrc. Run: git submodule update --init --recursive"
-}
-if (-not (Test-Path (Join-Path $whisperSrc 'CMakeLists.txt'))) {
-    throw "$whisperSrc exists but has no CMakeLists.txt — submodule isn't checked out."
-}
-
-# ── 2. Locate MSVC via vswhere ───────────────────────────────────────────────
-Write-Step "Locating MSVC..."
-$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-if (-not (Test-Path $vswhere)) {
-    throw "vswhere.exe not found. Install Visual Studio 2022 (Community or Build Tools) with the Desktop C++ workload."
-}
-$vsInstall = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-if (-not $vsInstall) {
-    throw "No Visual Studio install with the MSVC x64 C++ toolset was found."
-}
-Write-Host "    VS install: $vsInstall"
-
-$vsDevShellModule = Join-Path $vsInstall 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll'
-if (-not (Test-Path $vsDevShellModule)) {
-    throw "Microsoft.VisualStudio.DevShell.dll not found at $vsDevShellModule."
+# ── 1. Idempotency — skip if already populated with the requested tag ─────
+$tagMarker = Join-Path $payload '.tag'
+if (-not $Force -and (Test-Path $tagMarker)) {
+    $existing = (Get-Content -LiteralPath $tagMarker -Raw).Trim()
+    if ($existing -eq $Tag) {
+        Write-Host "Payload already at $Tag (use -Force to re-download)." -ForegroundColor Green
+        Write-Host "  Path: $payload"
+        exit 0
+    }
 }
 
-# ── 3. Verify CMake is reachable ─────────────────────────────────────────────
-Write-Step "Verifying CMake..."
-# NOTE: do NOT redirect stderr (`2>&1`) on native exes in PS 5.1 — it wraps each line
-# in an ErrorRecord and flips $? to false even on exit 0, breaking ErrorActionPreference.
-$cmakeVersion = (& cmake --version | Select-Object -First 1)
-if ($LASTEXITCODE -ne 0) {
-    throw "CMake not found on PATH. Install CMake 3.28+ from https://cmake.org/download/."
+# ── 2. Compute artifact URL ───────────────────────────────────────────────
+# Naming convention: https://github.com/ggerganov/whisper.cpp/releases/download/<tag>/whisper-bin-x64.zip
+# The release page also publishes BLAS / cuBLAS / Vulkan variants — we want
+# the plain CPU build because PRD §1 promises CPU-only for v1.0.
+$artifact = 'whisper-bin-x64.zip'
+$url      = "https://github.com/ggerganov/whisper.cpp/releases/download/$Tag/$artifact"
+
+# ── 3. Download (cached by tag) ───────────────────────────────────────────
+New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
+$zipPath = Join-Path $cacheDir "$Tag-$artifact"
+if (-not (Test-Path $zipPath) -or $Force) {
+    Write-Step "Downloading $url"
+    # Invoke-WebRequest follows redirects + works in PS 5.1.
+    # ProgressPreference=SilentlyContinue makes the download ~10× faster on
+    # Windows PowerShell (the progress bar is a known IWR perf hog).
+    $previousProgressPreference = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
+    }
+    finally {
+        $ProgressPreference = $previousProgressPreference
+    }
+    Write-Host "    Wrote $zipPath ($([math]::Round((Get-Item $zipPath).Length / 1MB, 1)) MB)"
 }
-Write-Host "    $cmakeVersion"
-
-# ── 4. Enter VS Developer Environment ────────────────────────────────────────
-Write-Step "Entering VS Developer Environment (x64)..."
-Import-Module $vsDevShellModule
-Enter-VsDevShell -VsInstallPath $vsInstall -DevCmdArguments '-arch=x64 -host_arch=x64' -SkipAutomaticLocation | Out-Null
-
-# ── 5. Optional clean ────────────────────────────────────────────────────────
-if ($Clean -and (Test-Path $whisperBuild)) {
-    Write-Step "Cleaning previous build dir..."
-    Remove-Item -Recurse -Force $whisperBuild
-}
-
-# ── 6. Configure ─────────────────────────────────────────────────────────────
-Write-Step "Configuring whisper.cpp via cmake..."
-Push-Location $whisperSrc
-try {
-    & cmake -B build `
-        -DGGML_NATIVE=OFF `
-        -DWHISPER_BUILD_TESTS=OFF `
-        -DWHISPER_BUILD_EXAMPLES=ON `
-        -DCMAKE_BUILD_TYPE=$Configuration
-    if ($LASTEXITCODE -ne 0) { throw "cmake configure failed with exit code $LASTEXITCODE." }
-
-    # ── 7. Build ──────────────────────────────────────────────────────────────
-    Write-Step "Building whisper-cli ($Configuration)..."
-    & cmake --build build --config $Configuration --target whisper-cli
-    if ($LASTEXITCODE -ne 0) { throw "cmake build failed with exit code $LASTEXITCODE." }
-}
-finally {
-    Pop-Location
+else {
+    Write-Host "    Cached: $zipPath" -ForegroundColor Green
 }
 
-# ── 8. Collect outputs ───────────────────────────────────────────────────────
-Write-Step "Copying outputs to $payload..."
+# ── 4. Extract to a tag-scoped subdirectory ───────────────────────────────
+$extractDir = Join-Path $cacheDir "$Tag-extracted"
+if (Test-Path $extractDir) {
+    Remove-Item -Recurse -Force $extractDir
+}
+Write-Step "Extracting"
+Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+
+# ── 5. Reset payload directory ────────────────────────────────────────────
 if (Test-Path $payload) {
     Remove-Item -Recurse -Force $payload
 }
 New-Item -ItemType Directory -Force -Path $payload | Out-Null
 
-$cliExeSearch = Get-ChildItem -Path $whisperBuild -Recurse -Filter 'whisper-cli.exe' | Select-Object -First 1
-if (-not $cliExeSearch) {
-    throw "whisper-cli.exe not produced. Check cmake build output above."
+# ── 6. Locate the CLI binary ──────────────────────────────────────────────
+# v1.7+ ships `whisper-cli.exe`; older releases used `main.exe`. Accept
+# either so the script works across the v1.6..v1.8+ range.
+$cli = Get-ChildItem -Path $extractDir -Recurse -File |
+    Where-Object { $_.Name -in @('whisper-cli.exe', 'main.exe') } |
+    Select-Object -First 1
+if (-not $cli) {
+    throw "Couldn't find whisper-cli.exe or main.exe in $extractDir. Did the artifact layout change for $Tag?"
 }
+Write-Host "    Found CLI: $($cli.Name) at $($cli.FullName)"
 
-# Rename to whisper.exe so the C# runner finds it under the documented name.
-Copy-Item $cliExeSearch.FullName (Join-Path $payload 'whisper.exe')
+# ── 7. Copy CLI as whisper.exe + all runtime DLLs ─────────────────────────
+# The C# WhisperRunner expects the binary at <payload>/whisper.exe regardless
+# of upstream naming; rename happens here, not at install time.
+Copy-Item -LiteralPath $cli.FullName -Destination (Join-Path $payload 'whisper.exe')
 
-# All DLLs the cli depends on at runtime (whisper, ggml, plus any GGML backends).
-$dllSources = Get-ChildItem -Path $whisperBuild -Recurse -Filter '*.dll' |
-    Where-Object { $_.FullName -notmatch '\\Test' }
-foreach ($dll in $dllSources) {
-    Copy-Item $dll.FullName $payload -Force
+$dlls = Get-ChildItem -Path $extractDir -Recurse -File -Filter '*.dll'
+foreach ($dll in $dlls) {
+    Copy-Item -LiteralPath $dll.FullName -Destination $payload -Force
 }
+Write-Host "    Copied $($dlls.Count) DLL(s) + whisper.exe"
 
-# ── 9. SHA-256 manifest ──────────────────────────────────────────────────────
-Write-Step "Computing SHA-256 manifest..."
+# ── 8. Tag marker for idempotency ─────────────────────────────────────────
+Set-Content -LiteralPath $tagMarker -Value $Tag -Encoding utf8
+
+# ── 9. SHA-256 manifest ───────────────────────────────────────────────────
+Write-Step "Computing SHA-256 manifest"
 $shaPath = Join-Path $payload 'SHA256SUMS'
-Get-ChildItem -Path $payload -File |
-    Where-Object { $_.Name -ne 'SHA256SUMS' } |
+$lines = Get-ChildItem -Path $payload -File |
+    Where-Object { $_.Name -notin @('SHA256SUMS', '.tag') } |
+    Sort-Object Name |
     ForEach-Object {
         $h = (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant()
         "$h  $($_.Name)"
-    } | Set-Content -Encoding utf8 $shaPath
-
+    }
+Set-Content -LiteralPath $shaPath -Value $lines -Encoding utf8
 Write-Host ""
-Get-Content $shaPath | ForEach-Object { Write-Host "    $_" }
+$lines | ForEach-Object { Write-Host "    $_" }
 
-# ── 10. Smoke test ───────────────────────────────────────────────────────────
-Write-Step "Smoke testing whisper.exe -h..."
+# ── 10. Smoke test ────────────────────────────────────────────────────────
+Write-Step "Smoke testing whisper.exe -h"
 $exe = Join-Path $payload 'whisper.exe'
-& $exe -h | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    throw "Smoke test failed: '$exe -h' exited with code $LASTEXITCODE."
+# Accept exit codes 0 OR 1:
+#   - 0: newer whisper-cli (v1.7+) returns success for -h
+#   - 1: legacy main.exe (≤v1.6) returns failure for "unknown argument" with
+#        usage to stderr — but the binary loaded its DLLs and ran its arg
+#        parser, which is what we're verifying here.
+# Hard DLL-load crashes show up as large negative exit codes (e.g.
+# -1073741515 STATUS_DLL_NOT_FOUND), which we DO want to fail on.
+& $exe -h 2>$null | Out-Null
+$smokeExit = $LASTEXITCODE
+if ($smokeExit -notin @(0, 1)) {
+    throw "Smoke test failed: '$exe -h' exited with code $smokeExit (expected 0 or 1; large negatives mean missing DLL)."
 }
+# Reset so the script itself exits 0 even when the smoke check used a binary
+# that returned 1 for -h. Without this, PowerShell propagates the last
+# native exit code as the script's own exit code, breaking CI gating.
+$global:LASTEXITCODE = 0
 
 Write-Host ""
-Write-Step "Done. whisper.exe + DLLs are in: $payload"
-Write-Host "    Update src/KusPus.Whisper/Resources/models.json: replace TODO_PIN with the"
-Write-Host "    huggingface.co/ggerganov/whisper.cpp commit SHA you're pinning to, and the"
-Write-Host "    TODO_FILL_AFTER_DOWNLOADING_VERIFIED_MODEL sha256 fields with the real hashes."
+Write-Step "Done."
+Write-Host "    whisper.exe + DLLs: $payload"
+Write-Host "    Pinned to tag:      $Tag"
+Write-Host "    SHA256 manifest:    $shaPath"
+Write-Host ""
+Write-Host "Next: tools/IconBuilder for icon.ico, then iscc.exe installer/KusPus.iss"
