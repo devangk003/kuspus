@@ -396,11 +396,13 @@
                         </ControlTemplate>
                     </Button.Template>
                     <!-- Morphs between dot (RadiusX=4 ≈ circle since W=8) and
-                         filled rounded-square (RadiusX=1.5) as FSM toggles. -->
+                         filled rounded-square (RadiusX=1.5) as FSM toggles.
+                         Fill follows the same grey-idle / red-recording pattern
+                         as CompactRecordGlyph — UpdateRecordGlyph swaps it. -->
                     <Rectangle x:Name="RecordGlyph"
                                Width="8" Height="8"
                                RadiusX="4" RadiusY="4"
-                               Fill="#EF5350"/>
+                               Fill="{DynamicResource MutedText}"/>
                 </Button>
 
                 <!-- Mic chooser — flex-grow. Tap opens a real popup picker

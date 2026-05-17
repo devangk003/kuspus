@@ -1252,21 +1252,26 @@ public partial class FloatingPillWindow : Window
 
     private void UpdateRecordGlyph(PillVisual state)
     {
+        // Both record glyphs (dock + compact corner) follow the same state
+        // pattern: grey dot when idle (tap to start), red rounded-square when
+        // recording (tap to stop). Per user dogfood feedback 2026-05-17.
         bool recording = state == PillVisual.Recording;
-        // Dock record glyph (8×8): full-circle dot ↔ rounded square. Always red.
+        var brush = recording
+            ? (System.Windows.Media.Brush)new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromRgb(0xEF, 0x53, 0x50))
+            : (System.Windows.Media.Brush)System.Windows.Application.Current.FindResource("MutedText");
+
+        // Dock record glyph (8×8): full-circle dot ↔ rounded square.
         double rDock = recording ? 1.5 : 4;
         RecordGlyph.RadiusX = rDock;
         RecordGlyph.RadiusY = rDock;
-        // Compact corner record glyph (10×10): grey-when-idle, red-when-recording
-        // (per user dogfood feedback — the corner button shouldn't read as
-        // "always recording"; grey communicates "available, tap to start").
+        RecordGlyph.Fill = brush;
+
+        // Compact corner record glyph (10×10).
         double rCompact = recording ? 2 : 5;
         CompactRecordGlyph.RadiusX = rCompact;
         CompactRecordGlyph.RadiusY = rCompact;
-        CompactRecordGlyph.Fill = recording
-            ? new System.Windows.Media.SolidColorBrush(
-                System.Windows.Media.Color.FromRgb(0xEF, 0x53, 0x50))
-            : (System.Windows.Media.Brush)System.Windows.Application.Current.FindResource("MutedText");
+        CompactRecordGlyph.Fill = brush;
     }
 
     private void OnRecordToggleClick(object sender, RoutedEventArgs e)

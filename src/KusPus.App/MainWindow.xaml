@@ -885,7 +885,7 @@
                         <StackPanel Grid.Column="0">
                             <TextBlock Text="MIT licensed · Local-first · No telemetry."
                                        Style="{StaticResource Type.Footnote}"/>
-                            <TextBlock Text="Local Privacy First"
+                            <TextBlock Text="Local · Privacy First"
                                        Style="{StaticResource Type.HintItalic}"
                                        Margin="0,4,0,0"/>
                         </StackPanel>
