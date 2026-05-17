@@ -160,6 +160,8 @@ public partial class FloatingPillWindow : Window
     private ILogger<FloatingPillWindow> _logger = NullLogger<FloatingPillWindow>.Instance;
     private Action? _onClose;
     private Action? _onSettings;
+    private Action? _onRecordToggle;
+    private DispatcherTimer? _nudgeTimer;
 
     // ── Visualizer state ────────────────────────────────────────────────────
     private readonly WpfRectangle[] _bars = new WpfRectangle[BarCount];
@@ -218,6 +220,15 @@ public partial class FloatingPillWindow : Window
     /// "Preferences…" item. Per docs/APP_DESIGN.md §13 audit follow-up.
     /// </summary>
     public void SetSettingsAction(Action onSettings) => _onSettings = onSettings;
+
+    /// <summary>
+    /// Wires the dock's record toggle button to a host-supplied action —
+    /// composition root binds to <c>AppCoordinator.ToggleFromTray</c>. Per user
+    /// spec the toggle does NOT auto-capture a foreground target window; the
+    /// transcript pastes wherever focus is when transcribe finishes. The nudge
+    /// popup hints the user to click into their text field while we record.
+    /// </summary>
+    public void SetRecordToggleAction(Action onToggle) => _onRecordToggle = onToggle;
 
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
@@ -579,6 +590,17 @@ public partial class FloatingPillWindow : Window
 
         // Update recording flag — drives the visualizer motion model.
         _isRecording = next == PillVisual.Recording;
+
+        // Dock's record glyph reflects FSM state: dot when not recording,
+        // filled red square when actively recording (so the toggle's affordance
+        // matches "press to stop"). Hide the nudge once recording truly begins
+        // since it served its purpose.
+        UpdateRecordGlyph(next);
+        if (next == PillVisual.Recording)
+        {
+            RecordNudgePopup.IsOpen = false;
+            _nudgeTimer?.Stop();
+        }
 
         // Accent line + glow per §3.4 opacity table. Idle and Hidden both render
         // the accent line invisible.
@@ -1197,14 +1219,48 @@ public partial class FloatingPillWindow : Window
         // resting state; next hover will OpenDock normally.
     }
 
+    private void UpdateRecordGlyph(PillVisual state)
+    {
+        // RadiusX=4 + W=8 renders as a circle (radius = half side). Drop the
+        // radius to 1.5 and it reads as a filled rounded square — the canonical
+        // "press to stop" affordance.
+        bool recording = state == PillVisual.Recording;
+        RecordGlyph.RadiusX = recording ? 1.5 : 4;
+        RecordGlyph.RadiusY = recording ? 1.5 : 4;
+    }
+
     private void OnRecordToggleClick(object sender, RoutedEventArgs e)
     {
-        // TODO Phase X: wire to AppCoordinator's tap-mode-recording API once it
-        // exists. For now this is a visible affordance with no behavior — the
-        // hotkey chord remains the canonical way to start dictation.
 #pragma warning disable CA1848, CA1873
-        _logger.LogDebug("Record toggle clicked — not yet wired to AppCoordinator.");
+        _logger.LogDebug("Record toggle clicked → ToggleFromTray.");
 #pragma warning restore CA1848, CA1873
+        _onRecordToggle?.Invoke();
+        // Nudge appears only when starting a fresh recording (Idle → Recording).
+        // The post-toggle snapshot will arrive on the next Render(); we look at
+        // the CURRENT visual instead since render() lags one dispatch. Showing
+        // the nudge when stopping (Recording → Transcribing) would be noise.
+        if (_currentVisual is PillVisual.Idle)
+        {
+            ShowRecordNudge();
+        }
+    }
+
+    private void ShowRecordNudge()
+    {
+        // 6s display per user feedback — the previous 3 s window dismissed
+        // before the user could read it. Auto-dismisses when state moves to
+        // Recording (Render() / TransitionTo) so the nudge doesn't linger
+        // after dictation actually started.
+        _nudgeTimer?.Stop();
+        RecordNudgePopup.IsOpen = true;
+        _nudgeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(6) };
+        _nudgeTimer.Tick += (_, _) =>
+        {
+            _nudgeTimer?.Stop();
+            _nudgeTimer = null;
+            RecordNudgePopup.IsOpen = false;
+        };
+        _nudgeTimer.Start();
     }
 
     private void OnMicChooserClick(object sender, RoutedEventArgs e)

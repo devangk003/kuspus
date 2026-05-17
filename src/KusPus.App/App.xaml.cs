@@ -115,6 +115,12 @@ public partial class App : System.Windows.Application
         // up). Wired here, not above, because _mainWindow has to exist first.
         _pill.SetSettingsAction(() => _mainWindow.ShowOn("general"));
 
+        // Dock record button = tap-mode toggle. Per user spec the toggle does
+        // not auto-grab a foreground target — the post-transcribe paste lands
+        // wherever focus is at the time. Coordinator.ToggleFromTray is the
+        // existing entry point for the FSM's ToggleFromTray event.
+        _pill.SetRecordToggleAction(_coordinator.ToggleFromTray);
+
         // Push the user's preferred input device id into the AudioRecorder on
         // startup AND on every settings change. Composition-root owns this
         // because AudioRecorder doesn't take a Persistence dependency.
@@ -137,8 +143,10 @@ public partial class App : System.Windows.Application
         prefsStore.Changes.Subscribe(s => Dispatcher.BeginInvoke(() => UpdatePillReduceAnimations(s)));
 
         _tray = new TrayManager(
+            prefsStore,
             _coordinator,
-            onPreferences: () => _mainWindow.ShowOn("general"),
+            onToggleRecorder: _coordinator.ToggleFromTray,
+            onOpenTab: tab => _mainWindow.ShowOn(tab),
             onQuit: Shutdown);
 
         _coordinator.Start();

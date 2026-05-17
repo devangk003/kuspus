@@ -335,9 +335,12 @@
                             </ControlTemplate.Triggers>
                         </ControlTemplate>
                     </Button.Template>
-                    <Ellipse x:Name="RecordGlyph"
-                             Width="8" Height="8"
-                             Fill="#EF5350"/>
+                    <!-- Morphs between dot (RadiusX=4 ≈ circle since W=8) and
+                         filled rounded-square (RadiusX=1.5) as FSM toggles. -->
+                    <Rectangle x:Name="RecordGlyph"
+                               Width="8" Height="8"
+                               RadiusX="4" RadiusY="4"
+                               Fill="#EF5350"/>
                 </Button>
 
                 <!-- Mic chooser — flex-grow. Tap opens a real popup picker
@@ -398,6 +401,30 @@
                                    Margin="6,0,0,0"/>
                     </Grid>
                 </Button>
+
+                <!-- Record-toggle nudge — small balloon above the pill that
+                     appears on RecordButton click to hint "click your target
+                     text field". Per user spec, the toggle starts recording
+                     immediately; the nudge is only a hint, not a state gate. -->
+                <Popup x:Name="RecordNudgePopup"
+                       PlacementTarget="{Binding ElementName=RecordButton}"
+                       Placement="Top"
+                       StaysOpen="True"
+                       AllowsTransparency="True"
+                       PopupAnimation="Fade"
+                       VerticalOffset="-8">
+                    <Border Background="{DynamicResource Surface}"
+                            BorderBrush="{DynamicResource BorderStrong}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="10,7">
+                        <TextBlock Text="Click into your text field"
+                                   FontFamily="Segoe UI Variable Text, Segoe UI"
+                                   FontSize="11"
+                                   FontWeight="Medium"
+                                   Foreground="{DynamicResource PrimaryText}"/>
+                    </Border>
+                </Popup>
 
                 <!-- Mic chooser popup — fully restyled to match the design-system
                      Surface tokens. ScrollViewer set to PanningMode=VerticalOnly +
