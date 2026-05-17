@@ -83,12 +83,12 @@ Compression=lzma2/max
 SolidCompression=yes
 LZMAUseSeparateProcess=yes
 
-; CloseApplications + RestartApplicationsIfNeeded=no — kill any running KusPus
-; before overwriting files; do not auto-restart (we have no in-process update
-; flow yet, and an installer-spawned launch wouldn't pick up the new files
+; CloseApplications + RestartApplications=no — kill any running KusPus before
+; overwriting files; do not auto-restart (we have no in-process update flow
+; yet, and an installer-spawned launch wouldn't pick up the new files
 ; cleanly in self-contained-single-file mode anyway).
 CloseApplications=force
-RestartApplicationsIfNeeded=no
+RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
