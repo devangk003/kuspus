@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Hardened runtime relaxations for CoreCLR (subset of Microsoft's documented
+       default entitlement set for .NET apps, learn.microsoft.com/dotnet/core/install/macos-notarization-issues). -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <!-- Library validation would refuse the bundled dylibs (CoreCLR, ggml/whisper)
+       whenever the app's signing identity has no Team ID — i.e. every build that is
+       not Developer-ID signed, including the local self-signed identity that keeps
+       permission grants stable across updates. dyld: "mapping process and mapped
+       file (non-platform) have different Team IDs". -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <!-- Microphone capture under the hardened runtime. -->
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+  <!-- NO com.apple.security.app-sandbox: the sandbox blocks CGEventPost to other
+       processes (the ⌘V paste) with no entitlement to re-enable it. -->
+</dict>
+</plist>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Entitlements for the whisper-cli subprocess (a plain native binary — no JIT,
+       no microphone). It is signed with the hardened runtime like the app; library
+       validation must be off so it can load the bundled ggml/whisper dylibs when the
+       signing identity has no Team ID (self-signed local identity, ad-hoc dev builds).
+       dyld otherwise aborts with "mapping process and mapped file (non-platform) have
+       different Team IDs". -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

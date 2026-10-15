@@ -1,0 +1,81 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Native AppKit shell for macOS. Composition root (AppDelegate) wires the
+       KusPus.Mac.Platform services into the shared KusPus.Coordination pipeline.
+       Menu-bar app (LSUIElement) — no Dock icon; the floating pill + status item
+       are the primary surfaces, exactly like the WPF app's pill + tray. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-macos</TargetFramework>
+    <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
+    <!-- Build against the macOS 27 SDK pack (matches the installed Xcode 27). -->
+    <TargetPlatformVersion>27.0</TargetPlatformVersion>
+    <RootNamespace>KusPus.Mac.App</RootNamespace>
+    <AssemblyName>KusPus</AssemblyName>
+    <ApplicationTitle>KusPus</ApplicationTitle>
+    <ApplicationId>com.devangk003.kuspus</ApplicationId>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>$(KusPusVersion)</ApplicationDisplayVersion>
+    <RuntimeIdentifier>osx-arm64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <!-- WPF-style Nullable/analysers come from Directory.Build.props. No IL
+         trimming (LinkMode=None is the macios way to say PublishTrimmed=false):
+         whisper runs out of process, so there's little to gain and reflection-
+         heavy packages (Serilog, Sentry, DI) stay safe. -->
+    <LinkMode>None</LinkMode>
+    <CodesignEntitlements>Entitlements.plist</CodesignEntitlements>
+    <!-- Signing identity is supplied by CI / the release script
+         (-p:CodesignKey="Developer ID Application: …"). Dev builds are ad-hoc. -->
+    <EnableCodeSigning>true</EnableCodeSigning>
+    <CodesignKey Condition="'$(CodesignKey)' == ''">-</CodesignKey>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.0" />
+    <PackageReference Include="Serilog" Version="4.2.0" />
+    <PackageReference Include="Serilog.Extensions.Logging" Version="9.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+    <PackageReference Include="Sentry" Version="5.0.0" />
+    <PackageReference Include="System.Reactive" Version="6.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KusPus.Core\KusPus.Core.csproj" />
+    <ProjectReference Include="..\KusPus.Coordination\KusPus.Coordination.csproj" />
+    <ProjectReference Include="..\KusPus.Persistence\KusPus.Persistence.csproj" />
+    <ProjectReference Include="..\KusPus.Whisper\KusPus.Whisper.csproj" />
+    <ProjectReference Include="..\KusPus.Parakeet\KusPus.Parakeet.csproj" />
+    <ProjectReference Include="..\KusPus.Mac.Platform\KusPus.Mac.Platform.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- App icon (generated from icons/icon-mac.svg by tools/build-mac-icons.sh). -->
+    <BundleResource Include="Resources\KusPus.icns" Condition="Exists('Resources\KusPus.icns')" />
+    <!-- Brand mark (Preferences/About) + state-tinted marks for the notch island's tile
+         + social glyphs (About footer). NSImage renders SVG natively on macOS 11+. -->
+    <BundleResource Include="..\..\icons\icon.svg" Link="icon.svg" />
+    <BundleResource Include="..\..\icons\icon-idle.svg" Link="icon-idle.svg" />
+    <BundleResource Include="..\..\icons\icon-recording.svg" Link="icon-recording.svg" />
+    <BundleResource Include="..\..\icons\icon-error.svg" Link="icon-error.svg" />
+    <BundleResource Include="..\..\icons\social\github.svg" Link="github.svg" />
+    <BundleResource Include="..\..\icons\social\globe.svg" Link="globe.svg" />
+    <BundleResource Include="..\..\icons\social\linkedin.svg" Link="linkedin.svg" />
+    <BundleResource Include="..\..\icons\social\x.svg" Link="x.svg" />
+    <!-- whisper-cli + dylibs + bundled tiny.en land in Contents/Resources/whisper/
+         when tools/build-whisper-macos.sh has populated the payload. Dev builds
+         without the payload still run (KUSPUS_WHISPER_DIR override). -->
+    <BundleResource Include="..\..\installer\payload\whisper-macos\**\*"
+                    Exclude="..\..\installer\payload\whisper-macos\.tag"
+                    Link="whisper\%(RecursiveDir)%(Filename)%(Extension)"
+                    Condition="Exists('..\..\installer\payload\whisper-macos')" />
+  </ItemGroup>
+
+  <!-- SHA-256 of whisper-cli → BuildConstants.ExpectedWhisperSha256 (shared target). -->
+  <PropertyGroup>
+    <KusPusWhisperShaFile>$(MSBuildThisFileDirectory)..\..\installer\payload\whisper-macos\SHA256SUMS</KusPusWhisperShaFile>
+    <KusPusWhisperShaRegex>([0-9a-f]{64})\s+whisper-cli</KusPusWhisperShaRegex>
+  </PropertyGroup>
+  <Import Project="..\..\build\WhisperSha.targets" />
+
+</Project>

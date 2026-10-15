@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>
+  <string>KusPus</string>
+  <key>CFBundleDisplayName</key>
+  <string>KusPus</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.devangk003.kuspus</string>
+  <key>CFBundleExecutable</key>
+  <string>KusPus</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleIconFile</key>
+  <string>KusPus</string>
+  <!-- CFBundleShortVersionString / CFBundleVersion come from the csproj
+       (ApplicationDisplayVersion / ApplicationVersion) so release scripts can stamp them. -->
+  <key>LSMinimumSystemVersion</key>
+  <string>15.0</string>
+  <!-- Menu-bar (agent) app: no Dock tile, no app menu. The status item + pill
+       are the surfaces, matching the Windows tray + pill. -->
+  <key>LSUIElement</key>
+  <true/>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSPrincipalClass</key>
+  <string>NSApplication</string>
+  <key>NSHumanReadableCopyright</key>
+  <string>© Devang Kumawat. MIT License.</string>
+  <!-- TCC usage strings. Microphone is the only prompt AVFoundation drives itself;
+       Input Monitoring and Accessibility are requested explicitly from onboarding. -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>KusPus records your voice while you hold the dictation hotkey. Audio never leaves this Mac.</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>KusPus pastes the transcript into the app you were using.</string>
+</dict>
+</plist>
