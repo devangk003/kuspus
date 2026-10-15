@@ -3,14 +3,14 @@
 
   # KusPus
 
-  > Local-only voice-to-text for Windows. Privacy-First.
+  > Local-only voice-to-text for Windows and macOS. Privacy-First.
 </div>
 
-KusPus is a floating, hotkey-driven dictation app for Windows. Hold **Left Ctrl + Left Win**, speak, release. The transcript pastes into whatever app you're in — terminal, browser, Slack, IDE, anywhere with a text field. Everything runs on your machine. No cloud, no account, no telemetry.
+KusPus is a floating, hotkey-driven dictation app for Windows and macOS. Hold **Left Ctrl + Left Win** (Windows) or **⌃ ⌘** (Mac), speak, release. The transcript pastes into whatever app you're in — terminal, browser, Slack, IDE, anywhere with a text field. Everything runs on your machine. No cloud, no account, no telemetry.
 
-Built in C# + WPF on .NET 10 with [whisper.cpp](https://github.com/ggerganov/whisper.cpp) (CPU). A from-scratch Windows rewrite of **WhisprFlow / FloatingRecorder** for macOS.
+Built in C# on .NET 10 with [whisper.cpp](https://github.com/ggerganov/whisper.cpp) and [NVIDIA Parakeet-TDT](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) (via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)): a WPF app on Windows (CPU) and a native AppKit app on macOS (Metal whisper), sharing the dictation pipeline, settings and history code. Parakeet v2 (English) and v3 (25 European languages) are one download away in Preferences → Models — faster and more accurate than Whisper large-v3 on CPU, with punctuation and casing built in. A from-scratch rewrite of **WhisprFlow / FloatingRecorder**.
 
-**Status:** v1.0.0. Installer on [Releases](https://github.com/devangk003/kuspus/releases).
+**Status:** v1.0.0 on Windows (installer on [Releases](https://github.com/devangk003/kuspus/releases)). macOS build in progress on `main` — see [docs/BUILD.md](docs/BUILD.md#macos) to build it yourself; a signed DMG lands with v1.1.
 
 ## Quick start
 
@@ -28,7 +28,9 @@ Microphone audio, transcripts, and clipboard contents **never leave your device*
 - **HuggingFace model downloads** — user-initiated only, from Preferences → Models.
 - **Opt-in Sentry crash reports** — default OFF, path-scrubbed before send.
 
-Both are gated by an **Offline Mode** toggle. With it on, all `HttpClient` instances refuse non-allowlisted hosts via `EgressAllowlistHandler` — defense-in-depth even if the UI misfires. Verifiable in source: `src/KusPus.App/EgressAllowlistHandler.cs`, `src/KusPus.Core/Telemetry/CrashScrubber.cs`.
+Both are gated by an **Offline Mode** toggle. With it on, all `HttpClient` instances refuse non-allowlisted hosts via `EgressAllowlistHandler` — defense-in-depth even if the UI misfires. Verifiable in source: `src/KusPus.Coordination/EgressAllowlistHandler.cs`, `src/KusPus.Core/Telemetry/CrashScrubber.cs`.
+
+On macOS the transcript is also marked `org.nspasteboard.ConcealedType`, so clipboard managers skip it.
 
 ## Contributing
 
@@ -45,8 +47,9 @@ Dev setup is in [docs/BUILD.md](docs/BUILD.md). The architecture overview is in 
 Post-v1.0 work, roughly prioritized:
 
 **v1.1 — Speed + reach**
+- **macOS app** (native AppKit, Metal whisper) — code is on `main`; needs a Developer ID signature for distribution.
 - Vulkan GPU backend for larger Whisper models (`base.en`, `small.en`).
-- Multilingual / Hinglish transcription (bundled `tiny` multilingual model + language picker).
+- Hinglish / Indic transcription (Parakeet v3 covers European languages only; Whisper `large-v3` remains the multilingual fallback).
 - Custom-model import UI.
 - Custom dictionary via Whisper's `--prompt` flag (bias for proper nouns, jargon, names).
 - Better install troubleshooting page with screenshots.
@@ -61,7 +64,6 @@ Post-v1.0 work, roughly prioritized:
 **v1.3+**
 - Native ARM64 build (Surface Pro X / Snapdragon X).
 - CUDA / DirectML backends.
-- Cross-platform Rust core shared with the Mac original.
 
 Suggestions welcome — open an issue if there's something missing.
 

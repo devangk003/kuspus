@@ -1,6 +1,8 @@
 # Installing KusPus
 
-This page is for **end-user testers** installing the v1.0 release. For developer setup, see [BUILD.md](BUILD.md).
+This page is for **end-user testers** installing the v1.0 release. For developer setup, see [BUILD.md](BUILD.md). The Windows installer is covered first; macOS is at the [bottom](#macos).
+
+
 
 ## What you're installing
 
@@ -9,6 +11,7 @@ A single per-user installer, ~155 MB on disk after install:
 - `KusPus.exe` — self-contained single-file (.NET 10 runtime bundled, ~86 MB).
 - `whisper.exe` + DLLs — CPU-only build of [whisper.cpp](https://github.com/ggerganov/whisper.cpp) v1.8.4, integrity-checked.
 - `ggml-tiny.en.bin` — ~75 MB Whisper model, so first launch works fully offline.
+- `sherpa-onnx-c-api.dll` + `onnxruntime.dll` — runtime for the optional NVIDIA Parakeet models (download them from Preferences → Models; ~650 MB each, CC-BY-4.0).
 
 The installer is **per-user, no admin/UAC prompt**. It writes to `%LOCALAPPDATA%\Programs\KusPus\`. Nothing global. Nothing in HKLM.
 
@@ -86,3 +89,21 @@ KusPus runs entirely on your machine. Microphone audio, transcribed text, and cl
 - **Opt-in Sentry crash reports** — default OFF; toggle in Preferences → Privacy; path-scrubbed before send (`%USERNAME%`, `%TEMP%`, etc. replaced).
 
 Both are gated by an **Offline Mode** toggle in Preferences → Privacy. When ON, all `HttpClient` instances refuse non-allowlisted hosts via `EgressAllowlistHandler` — defense-in-depth even if the UI gating misfires. The source code makes the posture verifiable: `src/KusPus.App/EgressAllowlistHandler.cs`, `src/KusPus.Core/Telemetry/CrashScrubber.cs`.
+
+## macOS
+
+The Mac app is built from the same repo (native AppKit, Metal-accelerated whisper). Until a signed DMG ships with v1.1, build it yourself per [BUILD.md § macOS](BUILD.md#macos) and drag `KusPus.app` to Applications.
+
+**First launch** runs a 9-step onboarding. Three macOS permissions are involved — each step deep-links to the right System Settings pane:
+
+| Permission | Why | If you skip it |
+|---|---|---|
+| **Microphone** | Record while you hold the hotkey. | Nothing works — KusPus can't hear you. |
+| **Input Monitoring** | The global hotkey is a system-wide keyboard listener (`CGEventTap`). | The hotkey never fires. The menu-bar and pill record buttons still work. |
+| **Accessibility** | Pasting the transcript sends a ⌘V keystroke to the app you were in. | KusPus copies the transcript to the clipboard and the pill tells you to paste it yourself. |
+
+If the hotkey doesn't respond after you grant Input Monitoring, quit and reopen KusPus — macOS sometimes needs a relaunch before a freshly granted tap starts delivering events.
+
+**Gatekeeper:** an unsigned (ad-hoc) build opened from a DMG downloaded in a browser will be refused ("damaged" / "can't be opened"). Right-click → Open, or `xattr -dr com.apple.quarantine KusPus.app`, for local builds. Release DMGs will be Developer ID signed and notarized, which removes this friction and makes the permission grants survive updates.
+
+**Where things live:** `~/Library/Application Support/KusPus/` (settings, history, downloaded models) and `~/Library/Logs/KusPus/` (logs — attach a slice to bug reports). Launch at login uses the standard Login Items list (System Settings → General).

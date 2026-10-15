@@ -35,6 +35,8 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
+    outputs:
+      tag: ${{ github.ref_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -56,13 +58,13 @@ jobs:
             nuget-${{ runner.os }}-
 
       - name: Restore
-        run: dotnet restore
+        run: dotnet restore KusPus.Windows.slnf
 
       - name: Test (full suite)
         # Release builds run the full xunit suite first — a failing test
         # on a tagged commit is a release-blocker. Use Release config so
         # the test environment matches what the published binary uses.
-        run: dotnet test --configuration Release --no-restore
+        run: dotnet test KusPus.Windows.slnf --configuration Release --no-restore
 
       - name: Build whisper.exe payload (pinned upstream release)
         # Downloads v1.8.4 (or whatever tools/build-whisper-windows.ps1
@@ -83,7 +85,7 @@ jobs:
         # (actions/runner-images#12464). This action both installs Inno 6
         # AND runs ISCC.exe on the script — one step for two jobs.
         # AppVersion via /DAppVersion= stamps the tag into both
-        # OutputBaseFilename (→ KusPus-Setup-v1.0.0.exe) and the .exe's
+        # OutputBaseFilename (→ KusPus-Setup-v1.5.0.exe) and the .exe's
         # version-info resource.
         # /Qp = quiet output, errors only.
         # TODO Phase 12+: pin to commit SHA + add Dependabot config so
@@ -133,3 +135,76 @@ jobs:
 
             ## Notes
             See generated release notes below.
+
+  # macOS: build whisper-cli from the pinned source, publish the .app, sign +
+  # notarize (when the Developer ID secrets are present), package a DMG and
+  # attach it to the same draft release. Without secrets the DMG is ad-hoc
+  # signed and only useful for local smoke tests.
+  release-macos:
+    runs-on: macos-26
+    needs: release
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Select Xcode 27
+        run: sudo xcode-select -s /Applications/Xcode_27.0.app || sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Install macOS workload (pinned set)
+        run: dotnet workload install macos --version 10.0.402 --skip-sign-check
+
+      - name: Build whisper-cli payload (pinned whisper.cpp tag)
+        run: tools/build-whisper-macos.sh
+
+      # Secrets can't be used in step conditions directly; surface "are they set?" via env.
+      - name: Import Developer ID certificate (if configured)
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+        run: |
+          if [ -z "$CERT_P12" ]; then
+            echo "No Developer ID secrets — the DMG will be ad-hoc signed."
+            exit 0
+          fi
+          KEYCHAIN=build.keychain
+          security create-keychain -p ci "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          security unlock-keychain -p ci "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          echo "$CERT_P12" | base64 --decode > cert.p12
+          security import cert.p12 -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          rm -f cert.p12
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci "$KEYCHAIN"
+          xcrun notarytool store-credentials kuspus-notary --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" --password "$NOTARY_PASSWORD"
+          echo "IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)"/\1/')" >> "$GITHUB_ENV"
+
+      - name: Package DMG
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [ -n "${IDENTITY:-}" ]; then
+            tools/package-macos.sh -v "$VERSION" -i "$IDENTITY" -p kuspus-notary
+          else
+            echo "::warning::No Developer ID secrets — producing an ad-hoc signed DMG (local testing only)."
+            tools/package-macos.sh -v "$VERSION"
+          fi
+
+      - name: Attach DMG to the draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer/Output/KusPus-*.dmg
+          draft: true
+          fail_on_unmatched_files: true
+          name: KusPus ${{ github.ref_name }}

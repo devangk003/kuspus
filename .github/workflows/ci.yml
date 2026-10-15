@@ -46,20 +46,110 @@ jobs:
             nuget-${{ runner.os }}-
 
       - name: Restore
-        run: dotnet restore
+        # Solution filter: the Mac projects can't restore on Windows (macOS workload).
+        run: dotnet restore KusPus.Windows.slnf
 
       - name: Build (Debug, zero warnings tolerated)
         # Directory.Build.props sets TreatWarningsAsErrors=true so any new
         # analyzer rule firing on master fails CI immediately.
-        run: dotnet build --configuration Debug --no-restore
+        run: dotnet build KusPus.Windows.slnf --configuration Debug --no-restore
 
       - name: Test
-        run: dotnet test --configuration Debug --no-build --logger "trx;LogFileName=test-results.trx"
+        run: dotnet test KusPus.Windows.slnf --configuration Debug --no-build --logger "trx;LogFileName=test-results.trx"
 
       - name: Upload test results
         if: always()  # publish even on test failure so the report is browsable
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
+          name: test-results-windows
+          path: '**/test-results.trx'
+          retention-days: 14
+
+  # Platform-neutral projects (Core, Persistence, Whisper, Coordination) must
+  # also build + pass on macOS — they are shared with the AppKit app.
+  shared-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Build.props') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore KusPus.Shared.slnf
+
+      - name: Build (Debug, zero warnings tolerated)
+        run: dotnet build KusPus.Shared.slnf --configuration Debug --no-restore
+
+      - name: Test
+        run: dotnet test KusPus.Shared.slnf --configuration Debug --no-build --logger "trx;LogFileName=test-results.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-shared-macos
+          path: '**/test-results.trx'
+          retention-days: 14
+
+  # The AppKit app + its platform layer. Needs the macOS workload (pinned via
+  # global.json workloadVersion) and an Xcode matching the SDK pack
+  # (TargetPlatformVersion 27.0 in the Mac csprojs → Xcode 27).
+  macos-app:
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Select Xcode 27
+        run: |
+          ls /Applications | grep -i xcode
+          sudo xcode-select -s /Applications/Xcode_27.0.app || sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
+
+      - name: Install macOS workload (pinned set)
+        run: dotnet workload install macos --version 10.0.402 --skip-sign-check
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-mac-${{ hashFiles('**/*.csproj', '**/Directory.Build.props') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-mac-
+
+      - name: Build Mac app + platform (Debug, zero warnings tolerated)
+        run: |
+          dotnet build src/KusPus.Mac.Platform/KusPus.Mac.Platform.csproj --configuration Debug
+          dotnet build src/KusPus.Mac.App/KusPus.Mac.App.csproj --configuration Debug
+
+      - name: Test Mac platform layer
+        run: dotnet test test/KusPus.Mac.Platform.Tests/KusPus.Mac.Platform.Tests.csproj --configuration Debug --logger "trx;LogFileName=test-results.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-macos-app
           path: '**/test-results.trx'
           retention-days: 14

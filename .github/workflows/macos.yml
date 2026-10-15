@@ -1,0 +1,180 @@
+# KusPus macOS — build, test and package a DMG on every push / PR.
+#
+#   build-test  dotnet build + test of KusPus.Mac.slnf (the AppKit app, its platform
+#               layer and every shared project) on a macOS 26 runner with Xcode 27.
+#   dmg         whisper-cli payload (cached) → tools/package-macos.sh → DMG uploaded as
+#               a workflow artifact. Ad-hoc signed unless Developer ID secrets exist
+#               (then signed + notarized like release.yml).
+#
+# Tagged releases still go through release.yml, which attaches the DMG to the draft.
+
+name: macos
+
+on:
+  push:
+    branches: [main, macos-port]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  # Must match global.json workloadVersion (the macOS SDK pack targets Xcode 27).
+  MACOS_WORKLOAD_VERSION: '10.0.402'
+  WHISPER_TAG: 'v1.8.4'
+
+jobs:
+  build-test:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Select Xcode 27
+        run: |
+          XCODE="$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)"
+          [ -n "$XCODE" ] || XCODE=/Applications/Xcode.app
+          echo "Using $XCODE"
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+
+      - name: Install macOS workload (pinned set)
+        run: dotnet workload install macos --version "$MACOS_WORKLOAD_VERSION" --skip-sign-check
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-mac-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', 'global.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-mac-
+
+      - name: Restore
+        run: dotnet restore KusPus.Mac.slnf
+
+      - name: Build (Debug, zero warnings tolerated)
+        run: dotnet build KusPus.Mac.slnf --configuration Debug --no-restore
+
+      - name: Test
+        run: dotnet test KusPus.Mac.slnf --configuration Debug --no-build --logger "trx;LogFileName=test-results.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-macos
+          path: '**/test-results.trx'
+          retention-days: 14
+
+  dmg:
+    runs-on: macos-26
+    needs: build-test
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Select Xcode 27
+        run: |
+          XCODE="$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)"
+          [ -n "$XCODE" ] || XCODE=/Applications/Xcode.app
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+
+      - name: Install macOS workload (pinned set)
+        run: dotnet workload install macos --version "$MACOS_WORKLOAD_VERSION" --skip-sign-check
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-mac-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', 'global.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-mac-
+
+      # whisper-cli is built from source (~2 min); cache the finished payload per tag
+      # and build script so most runs skip it.
+      - name: Cache whisper-cli payload
+        id: whisper-cache
+        uses: actions/cache@v4
+        with:
+          path: installer/payload/whisper-macos
+          key: whisper-macos-${{ env.WHISPER_TAG }}-${{ hashFiles('tools/build-whisper-macos.sh', 'src/KusPus.Whisper/Resources/models.json') }}
+
+      - name: Build whisper-cli payload (pinned whisper.cpp tag)
+        if: steps.whisper-cache.outputs.cache-hit != 'true'
+        run: tools/build-whisper-macos.sh -t "$WHISPER_TAG"
+
+      - name: Resolve version
+        run: |
+          VERSION="$(sed -n 's:.*<KusPusVersion[^>]*>\(.*\)</KusPusVersion>.*:\1:p' Directory.Build.props | head -1)"
+          [ -n "$VERSION" ] || { echo "KusPusVersion not found in Directory.Build.props" >&2; exit 1; }
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          # Monotonic CFBundleVersion so every CI build installs as an upgrade.
+          echo "BUILD_NUMBER=$(date -u +%Y%m%d%H%M)" >> "$GITHUB_ENV"
+          echo "KusPus $VERSION (build $(date -u +%Y%m%d%H%M))"
+
+      # Secrets can't be used in step conditions directly; surface "are they set?" via env.
+      - name: Import Developer ID certificate (if configured)
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+        run: |
+          if [ -z "$CERT_P12" ]; then
+            echo "No Developer ID secrets — the DMG will be ad-hoc signed (right-click → Open on first launch)."
+            exit 0
+          fi
+          KEYCHAIN=build.keychain
+          security create-keychain -p ci "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          security unlock-keychain -p ci "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          echo "$CERT_P12" | base64 --decode > cert.p12
+          security import cert.p12 -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          rm -f cert.p12
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci "$KEYCHAIN"
+          xcrun notarytool store-credentials kuspus-notary --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" --password "$NOTARY_PASSWORD"
+          echo "IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)"/\1/')" >> "$GITHUB_ENV"
+
+      - name: Package DMG
+        run: |
+          if [ -n "${IDENTITY:-}" ]; then
+            tools/package-macos.sh -v "$VERSION" -b "$BUILD_NUMBER" -i "$IDENTITY" -p kuspus-notary
+          else
+            tools/package-macos.sh -v "$VERSION" -b "$BUILD_NUMBER"
+          fi
+          ls -la installer/Output
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: KusPus-${{ env.VERSION }}-macOS-${{ github.run_number }}
+          path: installer/Output/KusPus-*.dmg
+          if-no-files-found: error
+          retention-days: 30

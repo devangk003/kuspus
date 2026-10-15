@@ -140,6 +140,7 @@ $tiny = $manifest.models | Where-Object { $_.id -eq 'ggml-tiny.en' } | Select-Ob
 if (-not $tiny) {
     throw "models.json is missing the ggml-tiny.en entry - cannot bundle the model."
 }
+$tiny = $tiny.files[0]  # schema 3: url/sha256/fileName/sizeBytes live per-file
 
 $modelsDir = Join-Path $payload 'models'
 New-Item -ItemType Directory -Force -Path $modelsDir | Out-Null
