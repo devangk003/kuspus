@@ -72,9 +72,23 @@ public class CrashScrubberTests
     public void scrub_path_replaces_appdata_prefix()
     {
         var appdata = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var input = Path.Combine(appdata, "KusPus", "settings.json");
 
-        CrashScrubber.ScrubPath(input).Should().StartWith("%APPDATA%");
+        var scrubbed = CrashScrubber.ScrubPath(input);
+
+        // On macOS/Linux .NET resolves both special folders to the same directory,
+        // so the (deeper-wins) prefix table legitimately emits %LOCALAPPDATA% there.
+        if (string.Equals(appdata, localAppData, StringComparison.Ordinal))
+        {
+            scrubbed.Should().Match(s => s.StartsWith("%APPDATA%", StringComparison.Ordinal)
+                                      || s.StartsWith("%LOCALAPPDATA%", StringComparison.Ordinal));
+        }
+        else
+        {
+            scrubbed.Should().StartWith("%APPDATA%");
+        }
+        scrubbed.Should().NotContain(appdata);
     }
 
     [Fact]

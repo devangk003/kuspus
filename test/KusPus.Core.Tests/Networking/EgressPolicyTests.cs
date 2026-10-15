@@ -38,6 +38,8 @@ public class EgressPolicyTests
     [InlineData("https://huggingface.co/x")]
     [InlineData("https://cdn-lfs.huggingface.co/x")]
     [InlineData("https://api.huggingface.co/x")]
+    [InlineData("https://us.aws.cdn.hf.co/x")]   // resolve/ redirects land on HF's CDN
+    [InlineData("https://cas-bridge.xethub.hf.co/x")]
     public void huggingface_subdomains_match(string url)
     {
         EgressPolicy.IsAllowed(offlineMode: false, crashReportsOptedIn: false, new Uri(url))
@@ -60,6 +62,8 @@ public class EgressPolicyTests
     [InlineData("https://evil.com/")]
     [InlineData("https://huggingface.co.attacker.com/")]
     [InlineData("https://notreally-huggingface.co/")]
+    [InlineData("https://hf.co.attacker.com/")]
+    [InlineData("https://evilhf.co/")]
     [InlineData("https://sentry.io/")]                       // bare apex — no ingest label
     [InlineData("https://www.sentry.io/")]                   // no ingest label
     [InlineData("https://notingest.sentry.io/")]             // label is not exactly "ingest"

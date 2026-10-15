@@ -1,0 +1,47 @@
+<Project>
+  <!-- SHA-256 propagation from the whisper payload's SHA256SUMS into a build-time
+       constant that WhisperRunner's integrity check consumes. Shared by the WPF app
+       (whisper.exe, installer/payload/whisper/) and the AppKit app (whisper-cli,
+       installer/payload/whisper-macos/).
+
+       Importing project sets:
+         KusPusWhisperShaFile   path to SHA256SUMS (may not exist on dev builds)
+         KusPusWhisperShaRegex  regex whose group 1 is the hash for the subprocess
+         RootNamespace          namespace for the generated BuildConstants class
+
+       On release builds the payload script has populated SHA256SUMS before this
+       target runs; we grep the line and emit `internal const string
+       ExpectedWhisperSha256`. On dev builds (no file / no match) the constant is
+       empty and the runtime integrity check is a no-op — dev-mode skip.
+
+       The file is always written (even if the SHA is empty) so the Compile item
+       below finds something to include. Inputs/Outputs are OMITTED on purpose — we
+       want this to run every build so the Compile item gets dynamically added;
+       WriteLinesToFile is a fast no-op when the content matches. -->
+  <PropertyGroup>
+    <KusPusWhisperShaFile Condition="'$(KusPusWhisperShaFile)' == ''">$(MSBuildThisFileDirectory)..\installer\payload\whisper\SHA256SUMS</KusPusWhisperShaFile>
+    <KusPusWhisperShaRegex Condition="'$(KusPusWhisperShaRegex)' == ''">([0-9a-f]{64})\s+whisper\.exe</KusPusWhisperShaRegex>
+  </PropertyGroup>
+
+  <Target Name="EmitWhisperShaConstant"
+          BeforeTargets="BeforeCompile;CoreCompile">
+    <PropertyGroup>
+      <_KusPusShaCsFile>$(IntermediateOutputPath)WhisperSha.g.cs</_KusPusShaCsFile>
+      <_KusPusShaText Condition="Exists('$(KusPusWhisperShaFile)')">$([System.IO.File]::ReadAllText('$(KusPusWhisperShaFile)'))</_KusPusShaText>
+      <_KusPusWhisperSha>$([System.Text.RegularExpressions.Regex]::Match('$(_KusPusShaText)', '$(KusPusWhisperShaRegex)').Groups[1].Value)</_KusPusWhisperSha>
+    </PropertyGroup>
+    <MakeDir Directories="$(IntermediateOutputPath)" />
+    <WriteLinesToFile File="$(_KusPusShaCsFile)"
+                      Overwrite="true"
+                      WriteOnlyWhenDifferent="true"
+                      Lines="// &lt;auto-generated /&gt; — produced by EmitWhisperShaConstant in build/WhisperSha.targets.;namespace $(RootNamespace)%3B;internal static class BuildConstants;%7B;    public const string ExpectedWhisperSha256 = &quot;$(_KusPusWhisperSha)&quot;%3B;%7D" />
+    <Message Text="EmitWhisperShaConstant: whisper SHA = '$(_KusPusWhisperSha)' → $(_KusPusShaCsFile)"
+             Importance="normal" />
+    <!-- Added to @(Compile) AT TARGET-RUN TIME so it bypasses parse-time evaluation
+         of static <Compile Include> items, which would have Condition'd it out on
+         the first clean build before this target ever runs. -->
+    <ItemGroup>
+      <Compile Include="$(_KusPusShaCsFile)" Visible="false" />
+    </ItemGroup>
+  </Target>
+</Project>

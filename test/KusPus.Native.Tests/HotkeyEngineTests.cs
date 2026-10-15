@@ -2,6 +2,8 @@ using FluentAssertions;
 using KusPus.Core.Hotkeys;
 using Xunit;
 
+using KusPus.Core.Platform;
+
 namespace KusPus.Native.Tests;
 
 /// <summary>

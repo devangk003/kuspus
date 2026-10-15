@@ -1,6 +1,6 @@
 using KusPus.Core;
 
-namespace KusPus.Audio;
+namespace KusPus.Core.Platform;
 
 /// <summary>
 /// WASAPI shared-mode capture from the default input device, written to

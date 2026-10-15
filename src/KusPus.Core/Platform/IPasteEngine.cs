@@ -1,6 +1,6 @@
 using KusPus.Core;
 
-namespace KusPus.Native;
+namespace KusPus.Core.Platform;
 
 /// <summary>
 /// Captures the foreground HWND at chord-engage, then delivers the transcript via

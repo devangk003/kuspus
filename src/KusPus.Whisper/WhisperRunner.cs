@@ -15,7 +15,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace KusPus.Whisper;
 
 /// <summary>
-/// Subprocess-based implementation of <see cref="IWhisperRunner"/>. See TECH_SPEC §15.
+/// Subprocess-based implementation of <see cref="ITranscriber"/>. See TECH_SPEC §15.
 ///
 /// Lifecycle per transcribe call:
 ///   1. validate paths (whisper.exe / model / wav exist)
@@ -32,14 +32,19 @@ namespace KusPus.Whisper;
 /// Phase 6 milestone. Phase 3 unit tests cover argument formatting, thread-count
 /// selection, early-validation, and integrity-mismatch paths.
 /// </summary>
-public sealed class WhisperRunner : IWhisperRunner, IDisposable
+public sealed class WhisperRunner : ITranscriber, IDisposable
 {
-    private const string WhisperExeName = "whisper.exe";
+    /// <summary>Default subprocess file name — the Windows payload renames whisper-cli.exe to this.</summary>
+    public const string WindowsExeName = "whisper.exe";
+    /// <summary>Subprocess file name in the macOS bundle (built from source, upstream name kept).</summary>
+    public const string MacExeName = "whisper-cli";
+
     private const string IntegrityFailureMessage =
         "Whisper binary integrity check failed — please reinstall KusPus.";
 
     private readonly string _whisperDirectory;
     private readonly string _whisperExePath;
+    private readonly string _exeName;
     private readonly string _expectedWhisperSha256;
     private readonly Action<Process>? _onProcessStarted;
     private readonly TimeSpan _timeout;
@@ -58,10 +63,12 @@ public sealed class WhisperRunner : IWhisperRunner, IDisposable
         string expectedWhisperSha256,
         Action<Process>? onProcessStarted = null,
         TimeSpan? timeout = null,
-        ILogger<WhisperRunner>? logger = null)
+        ILogger<WhisperRunner>? logger = null,
+        string? exeName = null)
     {
         _whisperDirectory = whisperDirectory ?? throw new ArgumentNullException(nameof(whisperDirectory));
-        _whisperExePath = Path.Combine(_whisperDirectory, WhisperExeName);
+        _exeName = exeName ?? WindowsExeName;
+        _whisperExePath = Path.Combine(_whisperDirectory, _exeName);
         _expectedWhisperSha256 = expectedWhisperSha256
             ?? throw new ArgumentNullException(nameof(expectedWhisperSha256));
         _onProcessStarted = onProcessStarted;
@@ -76,7 +83,7 @@ public sealed class WhisperRunner : IWhisperRunner, IDisposable
     {
         if (!File.Exists(_whisperExePath))
         {
-            return Result.Fail<string>($"whisper.exe not found at {_whisperExePath}");
+            return Result.Fail<string>($"{_exeName} not found at {_whisperExePath}");
         }
         if (!File.Exists(model.Path))
         {
@@ -124,12 +131,12 @@ public sealed class WhisperRunner : IWhisperRunner, IDisposable
         {
             if (!process.Start())
             {
-                return Result.Fail<string>("whisper.exe failed to start.");
+                return Result.Fail<string>($"{_exeName} failed to start.");
             }
         }
         catch (Win32Exception ex)
         {
-            return Result.Fail<string>($"Failed to launch whisper.exe: {ex.Message}", ex);
+            return Result.Fail<string>($"Failed to launch {_exeName}: {ex.Message}", ex);
         }
 
         // Run the containment hook (typically Job Object assignment) immediately after
@@ -139,18 +146,19 @@ public sealed class WhisperRunner : IWhisperRunner, IDisposable
         {
             _onProcessStarted?.Invoke(process);
         }
-        catch (Win32Exception ex)
+        catch (Exception ex)
         {
             KillProcessTree(process);
             return Result.Fail<string>(
-                $"Failed to attach whisper.exe to its containment scope: {ex.Message}", ex);
+                $"Failed to attach {_exeName} to its containment scope: {ex.Message}", ex);
         }
 
         process.BeginErrorReadLine();
         process.BeginOutputReadLine();
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(_timeout);
+        var timeout = _timeout + EstimateProcessingAllowance(wavPath);
+        timeoutCts.CancelAfter(timeout);
         try
         {
             await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
@@ -159,8 +167,8 @@ public sealed class WhisperRunner : IWhisperRunner, IDisposable
         {
             // Timeout (not caller cancellation).
             KillProcessTree(process);
-            _logger.LogWarning("whisper.exe timed out after {Seconds}s; killed.", _timeout.TotalSeconds);
-            return Result.Fail<string>($"whisper.exe timed out after {_timeout.TotalSeconds:F0} seconds.");
+            _logger.LogWarning("Whisper subprocess timed out after {Seconds}s; killed.", timeout.TotalSeconds);
+            return Result.Fail<string>($"{_exeName} timed out after {timeout.TotalSeconds:F0} seconds.");
         }
         catch (OperationCanceledException)
         {
@@ -172,15 +180,15 @@ public sealed class WhisperRunner : IWhisperRunner, IDisposable
         {
             var preview = StderrPreview(stderr.ToString());
             _logger.LogWarning(
-                "whisper.exe exited with code {Code}. stderr preview: {Preview}",
+                "Whisper subprocess exited with code {Code}. stderr preview: {Preview}",
                 process.ExitCode, preview);
-            return Result.Fail<string>($"whisper.exe exited with code {process.ExitCode}.");
+            return Result.Fail<string>($"{_exeName} exited with code {process.ExitCode}.");
         }
 
         var sideFile = wavPath + ".txt";
         if (!File.Exists(sideFile))
         {
-            return Result.Fail<string>($"whisper.exe did not produce {sideFile}.");
+            return Result.Fail<string>($"{_exeName} did not produce {sideFile}.");
         }
 
         var transcript = await File.ReadAllTextAsync(sideFile, ct).ConfigureAwait(false);
@@ -245,7 +253,7 @@ public sealed class WhisperRunner : IWhisperRunner, IDisposable
             if (string.IsNullOrEmpty(_expectedWhisperSha256))
             {
                 _logger.LogWarning(
-                    "whisper.exe integrity check skipped — no expected SHA configured. " +
+                    "Whisper subprocess integrity check skipped — no expected SHA configured. " +
                     "Phase 12 release builds will set this from the build manifest.");
                 _integrityPassed = true;
                 _integrityChecked = true;
@@ -260,7 +268,7 @@ public sealed class WhisperRunner : IWhisperRunner, IDisposable
             if (!_integrityPassed)
             {
                 _logger.LogWarning(
-                    "whisper.exe SHA mismatch: expected {Expected}, got {Actual}.",
+                    "Whisper subprocess SHA mismatch: expected {Expected}, got {Actual}.",
                     _expectedWhisperSha256, actual);
                 return Result.Fail<bool>(IntegrityFailureMessage);
             }
@@ -307,6 +315,24 @@ public sealed class WhisperRunner : IWhisperRunner, IDisposable
         {
             // Best-effort: process may have exited between HasExited and Kill, or be
             // protected by the OS. There's nothing useful to do beyond stopping here.
+        }
+    }
+
+    /// <summary>
+    /// Extra timeout budget proportional to the take: 2× the audio length, assuming the
+    /// recorder's 16 kHz mono 16-bit PCM. A fixed budget alone fails long dictations on
+    /// the larger models.
+    /// </summary>
+    internal static TimeSpan EstimateProcessingAllowance(string wavPath)
+    {
+        try
+        {
+            long pcmBytes = Math.Max(0, new FileInfo(wavPath).Length - 44);
+            return TimeSpan.FromSeconds(2.0 * pcmBytes / (16_000 * 2));
+        }
+        catch (IOException)
+        {
+            return TimeSpan.Zero;
         }
     }
 }

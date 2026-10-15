@@ -169,14 +169,14 @@ public class WhisperRunnerTests : IDisposable
         sha256Hex = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
     }
 
-    private static ModelDescriptor MakeDescriptor() => new(
-        Id: "ggml-tiny.en",
-        DisplayName: "Tiny (English)",
-        FileName: "ggml-tiny.en.bin",
-        SizeBytes: 1,
-        Sha256: "irrelevant",
-        Url: string.Empty,
-        Bundled: true);
+    private static ModelDescriptor MakeDescriptor() => ModelDescriptor.SingleFile(
+        id: "ggml-tiny.en",
+        displayName: "Tiny (English)",
+        fileName: "ggml-tiny.en.bin",
+        sizeBytes: 1,
+        sha256: "irrelevant",
+        url: string.Empty,
+        bundled: true);
 
     private ResolvedModel MakeResolvedModel() =>
         new(MakeDescriptor(), Path.Combine(_tempDir, "model.bin"));

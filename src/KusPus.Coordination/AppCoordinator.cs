@@ -1,38 +1,40 @@
 #pragma warning disable CA1848
 #pragma warning disable CA1873
 
-using System.IO;
 using System.Reactive.Subjects;
-using System.Windows.Threading;
-using KusPus.Audio;
+using KusPus.Core.Platform;
 using KusPus.Core.Settings;
 using KusPus.Core.State;
-using KusPus.Native;
 using KusPus.Persistence;
 using KusPus.Whisper;
 using HistoryPasteOutcome = KusPus.Persistence.PasteOutcome;
-using NativePasteOutcome = KusPus.Native.PasteOutcome;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using NativeHotkeyEvent = KusPus.Native.HotkeyEvent;
-using NativeChordEngaged = KusPus.Native.ChordEngaged;
-using NativeChordReleased = KusPus.Native.ChordReleased;
-using NativeOtherKey = KusPus.Native.OtherKeyPressed;
+using PlatformHotkeyEvent = KusPus.Core.Platform.HotkeyEvent;
+using PlatformChordEngaged = KusPus.Core.Platform.ChordEngaged;
+using PlatformChordReleased = KusPus.Core.Platform.ChordReleased;
+using PlatformOtherKey = KusPus.Core.Platform.OtherKeyPressed;
+using PlatformHookReinstalled = KusPus.Core.Platform.HookReinstalled;
 using FsmChordEngaged = KusPus.Core.State.ChordEngaged;
 using FsmChordReleased = KusPus.Core.State.ChordReleased;
 using FsmOtherKey = KusPus.Core.State.OtherKeyPressedWhileArmed;
 
-namespace KusPus.App;
+namespace KusPus.Coordination;
 
 /// <summary>
 /// Wires the pure FSM in <see cref="Fsm"/> to the live services: hotkey events come
-/// in, side effects fan out to <see cref="IAudioRecorder"/>, <see cref="IWhisperRunner"/>,
+/// in, side effects fan out to <see cref="IAudioRecorder"/>, <see cref="ITranscriber"/>,
 /// <see cref="IPasteEngine"/>, and <see cref="IHistoryStore"/>. See TECH_SPEC §12.
 ///
-/// Threading: every FSM step + side-effect dispatch runs on the WPF dispatcher
-/// (UI thread). Hook events arrive on the LL hook thread and are marshalled here.
-/// Long-running side effects (audio capture, whisper transcribe) are kicked off
-/// as <c>Task.Run</c> fire-and-forget; their completion posts a synthetic
+/// Platform-neutral: every OS-specific service arrives through a <c>KusPus.Core.Platform</c>
+/// interface and UI-thread marshalling goes through <see cref="IUiDispatcher"/>, so the
+/// same coordinator drives both the WPF and the AppKit app.
+///
+/// Threading: every FSM step + side-effect dispatch runs on the UI thread via
+/// <see cref="IUiDispatcher.Post"/>. Hook events arrive on the platform's hook thread
+/// and are marshalled here. Long-running side effects (whisper transcribe, paste) are
+/// kicked off as <c>Task.Run</c> fire-and-forget with every piece of mutable state
+/// they need captured into locals first; their completion posts a synthetic
 /// <see cref="TranscribeComplete"/> / <see cref="TranscribeFailed"/> back through
 /// the same channel.
 /// </summary>
@@ -40,21 +42,25 @@ public sealed class AppCoordinator : IDisposable
 {
     private readonly IHotkeyEngine _hotkey;
     private readonly IAudioRecorder _audio;
-    private readonly IWhisperRunner _whisper;
+    private readonly ITranscriber _whisper;
     private readonly IPasteEngine _paste;
     private readonly IHistoryStore _history;
     private readonly IModelManager _models;
     private readonly IPrefsStore _prefs;
-    private readonly Dispatcher _dispatcher;
+    private readonly IUiDispatcher _dispatcher;
+    private readonly string _failedDir;
     private readonly ILogger<AppCoordinator> _logger;
 
     private readonly BehaviorSubject<CoordinatorSnapshot> _state =
         new(new CoordinatorSnapshot(AppState.Idle));
 
+    // All of the below are only touched on the UI thread (inside Dispatch).
     private CoordinatorSnapshot _snapshot = new(AppState.Idle);
     private FsmConfig _fsmConfig = new(HoldThresholdMs: 250);
     private IntPtr _capturedHwnd;
     private string? _pendingWavPath;
+    // True while a capture this coordinator started is open (see AbortAudioCaptureAsync).
+    private volatile bool _captureOwned;
     private DateTimeOffset _recordingStartedAt;
     private System.Threading.Timer? _holdTimer;
     private IDisposable? _hotkeySub;
@@ -64,12 +70,13 @@ public sealed class AppCoordinator : IDisposable
     public AppCoordinator(
         IHotkeyEngine hotkey,
         IAudioRecorder audio,
-        IWhisperRunner whisper,
+        ITranscriber whisper,
         IPasteEngine paste,
         IHistoryStore history,
         IModelManager models,
         IPrefsStore prefs,
-        Dispatcher dispatcher,
+        IUiDispatcher dispatcher,
+        string failedDir,
         ILogger<AppCoordinator>? logger = null)
     {
         _hotkey = hotkey;
@@ -80,6 +87,7 @@ public sealed class AppCoordinator : IDisposable
         _models = models;
         _prefs = prefs;
         _dispatcher = dispatcher;
+        _failedDir = failedDir;
         _logger = logger ?? NullLogger<AppCoordinator>.Instance;
     }
 
@@ -121,9 +129,10 @@ public sealed class AppCoordinator : IDisposable
 
     public void Dispose()
     {
-        // Idempotent: AppCoordinator gets disposed both explicitly from App.OnExit
-        // AND by the DI ServiceProvider when it tears down singletons. Without this
-        // guard, Stop() runs twice and the second call double-disposes subjects.
+        // Idempotent: AppCoordinator gets disposed both explicitly from the app's
+        // exit path AND by the DI ServiceProvider when it tears down singletons.
+        // Without this guard, Stop() runs twice and the second call double-disposes
+        // subjects.
         if (_disposed)
         {
             return;
@@ -148,13 +157,17 @@ public sealed class AppCoordinator : IDisposable
 
     // ── hook → FSM ───────────────────────────────────────────────────────────
 
-    private void OnHookEvent(NativeHotkeyEvent evt)
+    private void OnHookEvent(PlatformHotkeyEvent evt)
     {
         CoordinatorEvent? mapped = evt switch
         {
-            NativeChordEngaged _ => new FsmChordEngaged(),
-            NativeChordReleased _ => new FsmChordReleased(),
-            NativeOtherKey _ => new FsmOtherKey(),
+            PlatformChordEngaged _ => new FsmChordEngaged(),
+            PlatformChordReleased _ => new FsmChordReleased(),
+            PlatformOtherKey _ => new FsmOtherKey(),
+            // The hook was rebuilt and chord state reset, so any key-up for a held chord
+            // is lost. Treat it as a release: ends a hold-mode recording, clears Cancelled;
+            // a no-op in Idle and tap-mode Recording.
+            PlatformHookReinstalled _ => new FsmChordReleased(),
             _ => null,
         };
         if (mapped is not null)
@@ -165,18 +178,21 @@ public sealed class AppCoordinator : IDisposable
 
     private void OnAudioDeviceChanged(object? sender, EventArgs e)
     {
-        // Treat mid-recording device change as a transcribe-failed event so the FSM
-        // returns to Idle through HandleTranscribeFailure (which logs + records).
-        Dispatch(new TranscribeFailed("Microphone changed mid-recording.", _pendingWavPath));
+        // The FSM only honours this while Recording; in any other state it's a no-op.
+        Dispatch(new RecordingFailed("Microphone changed mid-recording."));
     }
 
     private void Dispatch(CoordinatorEvent evt)
     {
-        // Async lambda on the dispatcher so we can `await` between effects.
+        // Async lambda on the UI thread so we can `await` between effects.
         // The FSM emits Stop+BeginTranscribe together for Recording → Transcribing;
         // these MUST be serialised so the wav is fully on disk before whisper reads it.
-        _dispatcher.BeginInvoke(new Action(async () =>
+        _dispatcher.Post(async () =>
         {
+            if (_disposed)
+            {
+                return; // late hook/timer event during shutdown
+            }
             try
             {
                 var transition = Fsm.Step(_snapshot, evt, _fsmConfig);
@@ -190,11 +206,14 @@ public sealed class AppCoordinator : IDisposable
                     await DispatchEffectAsync(effect).ConfigureAwait(true);
                 }
             }
-            catch (Exception ex) when (ex is IOException or InvalidOperationException)
+            catch (Exception ex)
             {
+                // This is an async-void continuation on the UI thread: anything that
+                // escapes here terminates the process. Log and carry on — the FSM is
+                // already in its next state and the next event will re-sync.
                 _logger.LogError(ex, "Error dispatching FSM event {Evt}.", evt.GetType().Name);
             }
-        }));
+        });
     }
 
     // ── FSM side effects → live services ─────────────────────────────────────
@@ -232,19 +251,59 @@ public sealed class AppCoordinator : IDisposable
                 await StopAudioCaptureAsync().ConfigureAwait(true);
                 break;
 
+            case AbortAudioCapture:
+                await AbortAudioCaptureAsync().ConfigureAwait(true);
+                break;
+
             case BeginTranscribe:
+            {
                 // Long-running (seconds). Fire-and-forget so subsequent FSM events
                 // (user pressing chord again) aren't blocked by the whisper run.
-                _ = Task.Run(BeginTranscribeAsync);
+                // Capture the wav + start time now: the next chord press can overwrite
+                // the fields while whisper is still running.
+                var wav = _pendingWavPath;
+                var startedAt = _recordingStartedAt;
+                _ = Task.Run(() => GuardAsync(
+                    () => BeginTranscribeAsync(wav, startedAt),
+                    ex => Dispatch(new TranscribeFailed($"Transcription error ({ex.GetType().Name})", wav))));
                 break;
+            }
 
             case DeliverTranscript dt:
-                _ = Task.Run(() => DeliverAsync(dt.Text, dt.Duration, dt.Model));
+            {
+                var hwnd = _capturedHwnd;
+                var wav = _pendingWavPath;
+                _pendingWavPath = null;
+                _ = Task.Run(() => GuardAsync(() => DeliverAsync(dt.Text, dt.Duration, dt.Model, hwnd, wav), null));
                 break;
+            }
 
             case HandleTranscribeFailure hf:
-                _ = Task.Run(() => HandleFailureAsync(hf.Error, hf.FailedWavPath));
+            {
+                // RecordingFailed carries no path; AbortAudioCapture may have stashed one.
+                var wav = hf.FailedWavPath ?? _pendingWavPath;
+                _pendingWavPath = null;
+                var startedAt = _recordingStartedAt;
+                _ = Task.Run(() => GuardAsync(() => HandleFailureAsync(hf.Error, wav, startedAt), null));
                 break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Runs a fire-and-forget effect so an exception can't vanish as an unobserved task
+    /// (which would leave the FSM parked in Transcribing with no way out).
+    /// </summary>
+    private async Task GuardAsync(Func<Task> work, Action<Exception>? onError)
+    {
+        try
+        {
+            await work().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Background coordinator effect failed.");
+            onError?.Invoke(ex);
         }
     }
 
@@ -254,12 +313,38 @@ public sealed class AppCoordinator : IDisposable
         if (!result.Success)
         {
             _logger.LogWarning("Audio start failed: {Error}", result.Error);
-            Dispatch(new TranscribeFailed(result.Error ?? "Audio start failed", null));
+            Dispatch(new RecordingFailed(result.Error ?? "Audio start failed"));
+            return;
+        }
+        _captureOwned = true;
+
+        // StartAsync can take a while on first use (the microphone permission prompt), and
+        // other FSM events run in the meantime. If the take was already stopped/aborted
+        // while we waited, nobody will stop this capture — close it so the mic doesn't
+        // stay on with the FSM idle.
+        _dispatcher.Post(() =>
+        {
+            if (_snapshot.State != AppState.Recording && _captureOwned)
+            {
+                _logger.LogWarning("Capture started after the take ended ({State}); discarding it.", _snapshot.State);
+                _ = Task.Run(() => GuardAsync(DiscardOrphanedCaptureAsync, null));
+            }
+        });
+    }
+
+    private async Task DiscardOrphanedCaptureAsync()
+    {
+        _captureOwned = false;
+        var result = await _audio.StopAsync().ConfigureAwait(false);
+        if (result.Success && result.Value is not null)
+        {
+            DeleteQuietly(result.Value.WavPath);
         }
     }
 
     private async Task StopAudioCaptureAsync()
     {
+        _captureOwned = false;
         var result = await _audio.StopAsync().ConfigureAwait(false);
         if (result.Success && result.Value is not null)
         {
@@ -272,9 +357,27 @@ public sealed class AppCoordinator : IDisposable
         }
     }
 
-    private async Task BeginTranscribeAsync()
+    private async Task AbortAudioCaptureAsync()
     {
-        var wav = _pendingWavPath;
+        // Best-effort. The recorder may have already stopped itself (device change,
+        // disk full) in which case StopAsync returns "Not recording." — that's fine.
+        // Only stop a capture we started: when StartAsync failed with "Already recording"
+        // the recorder belongs to someone else (Preferences test / onboarding Try-it),
+        // and stopping it would steal their take.
+        if (!_captureOwned)
+        {
+            return;
+        }
+        _captureOwned = false;
+        var result = await _audio.StopAsync().ConfigureAwait(false);
+        if (result.Success && result.Value is not null)
+        {
+            _pendingWavPath = result.Value.WavPath;
+        }
+    }
+
+    private async Task BeginTranscribeAsync(string? wav, DateTimeOffset startedAt)
+    {
         if (string.IsNullOrEmpty(wav))
         {
             Dispatch(new TranscribeFailed("No wav file produced by recorder.", null));
@@ -293,75 +396,84 @@ public sealed class AppCoordinator : IDisposable
         }
 
         _logger.LogInformation(
-            "Resolved model {Id} at {Path}; spawning whisper.exe.",
+            "Resolved model {Id} at {Path}; spawning whisper.",
             modelResult.Value!.Descriptor.Id, modelResult.Value!.Path);
 
         var computeStopwatch = System.Diagnostics.Stopwatch.StartNew();
         var transcribe = await _whisper.TranscribeAsync(wav, modelResult.Value!).ConfigureAwait(false);
         computeStopwatch.Stop();
 
-        if (transcribe.Success)
-        {
-            var totalDuration = DateTimeOffset.UtcNow - _recordingStartedAt;
-            _logger.LogInformation(
-                "Whisper returned {Chars} chars (compute {ComputeMs}ms, total {TotalSeconds:F1}s since start).",
-                transcribe.Value!.Length,
-                computeStopwatch.ElapsedMilliseconds,
-                totalDuration.TotalSeconds);
-            Dispatch(new TranscribeComplete(transcribe.Value!, totalDuration, settings.Models.ActiveModelId));
-        }
-        else
+        if (!transcribe.Success)
         {
             _logger.LogWarning("Whisper failed: {Error}", transcribe.Error);
             Dispatch(new TranscribeFailed(transcribe.Error!, wav));
-        }
-    }
-
-    private async Task DeliverAsync(string text, TimeSpan duration, string model)
-    {
-        string? wav = _pendingWavPath;
-        _pendingWavPath = null;
-
-        _logger.LogInformation(
-            "Delivering transcript ({Chars} chars) to HWND {Hwnd}.",
-            text.Length, _capturedHwnd);
-
-        if (_capturedHwnd == IntPtr.Zero)
-        {
-            await AppendHistoryAsync(text, duration, model, "?", TranscriptStatus.Ok, null, HistoryPasteOutcome.ClipboardOnly).ConfigureAwait(false);
             return;
         }
 
-        var outcome = await _paste.DeliverAsync(text, _capturedHwnd).ConfigureAwait(false);
+        var text = TranscriptFilter.Clean(transcribe.Value!);
+        if (text.Length == 0)
+        {
+            _logger.LogInformation("Whisper returned no speech (compute {ComputeMs}ms).", computeStopwatch.ElapsedMilliseconds);
+            Dispatch(new TranscribeFailed("No speech detected.", wav));
+            return;
+        }
+
+        var totalDuration = DateTimeOffset.UtcNow - startedAt;
+        _logger.LogInformation(
+            "Whisper returned {Chars} chars (compute {ComputeMs}ms, total {TotalSeconds:F1}s since start).",
+            text.Length,
+            computeStopwatch.ElapsedMilliseconds,
+            totalDuration.TotalSeconds);
+        Dispatch(new TranscribeComplete(text, totalDuration, settings.Models.ActiveModelId));
+    }
+
+    private async Task DeliverAsync(string text, TimeSpan duration, string model, IntPtr targetHwnd, string? wav)
+    {
+        _logger.LogInformation(
+            "Delivering transcript ({Chars} chars) to target {Hwnd}.",
+            text.Length, targetHwnd);
+
+        // Always go through the paste engine, even with no captured target: it still
+        // puts the text on the clipboard and reports "Window gone — text in clipboard",
+        // so the user never loses a transcript.
+        Core.Platform.PasteOutcome outcome;
+        try
+        {
+            outcome = await _paste.DeliverAsync(text, targetHwnd).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // A paste-engine bug must not swallow the transcript: the text is already on
+            // the clipboard by now, so report it as clipboard-only (error pill + history
+            // row) instead of dying as an unobserved task.
+            _logger.LogError(ex, "Paste engine threw; reporting clipboard-only outcome.");
+            outcome = new Core.Platform.PasteOutcome(false, "?", $"Paste failed — text in clipboard ({ex.GetType().Name})");
+        }
         _logger.LogInformation(
             "Paste outcome: pasted={Pasted} app={App} error={Error}.",
             outcome.Pasted, outcome.TargetApp, outcome.Error ?? "<none>");
 
         EmitPostPasteSnapshot(outcome.Pasted, outcome.TargetApp, outcome.Error);
 
-        var settingsHistory = _prefs.Current.History;
-        if (!settingsHistory.Enabled)
+        if (_prefs.Current.History.Enabled)
         {
-            return;
+            var pasteOutcome = outcome.Pasted
+                ? HistoryPasteOutcome.Pasted
+                : (outcome.Error?.Contains("Window gone", StringComparison.Ordinal) == true
+                    ? HistoryPasteOutcome.WindowGone
+                    : HistoryPasteOutcome.ClipboardOnly);
+
+            await AppendHistoryAsync(text, duration, model, outcome.TargetApp, TranscriptStatus.Ok, null, pasteOutcome).ConfigureAwait(false);
         }
 
-        var pasteOutcome = outcome.Pasted
-            ? HistoryPasteOutcome.Pasted
-            : (outcome.Error?.Contains("Window gone", StringComparison.Ordinal) == true
-                ? HistoryPasteOutcome.WindowGone
-                : HistoryPasteOutcome.ClipboardOnly);
-
-        await AppendHistoryAsync(text, duration, model, outcome.TargetApp, TranscriptStatus.Ok, null, pasteOutcome).ConfigureAwait(false);
-
-        // Successful transcription — clean up the wav.
-        if (wav is not null && File.Exists(wav))
-        {
-            try { File.Delete(wav); } catch (IOException ex) { _logger.LogDebug(ex, "Failed to delete {Wav}.", wav); }
-        }
+        // Successful transcription — the wav is never kept, regardless of the
+        // history setting. (Previously the history-disabled path returned early
+        // and left every recording in %TEMP%.)
+        DeleteQuietly(wav);
     }
 
     /// <summary>
-    /// Marshals a one-shot post-paste snapshot onto the dispatcher so the pill can
+    /// Marshals a one-shot post-paste snapshot onto the UI thread so the pill can
     /// render Confirmed (1 s) or Error (2 s) per design spec §2.5 / §2.6. The FSM
     /// itself already transitioned to Idle before this fires; the snapshot rides
     /// on top of Idle with <see cref="PostPasteInfo"/> attached.
@@ -369,13 +481,25 @@ public sealed class AppCoordinator : IDisposable
     private void EmitPostPasteSnapshot(bool pasted, string targetApp, string? error)
     {
         var info = new PostPasteInfo(pasted, targetApp, error);
-        _dispatcher.BeginInvoke(new Action(() =>
+        _dispatcher.Post(() =>
         {
+            if (_disposed)
+            {
+                return;
+            }
+            // Only decorate Idle. If the user already started the next dictation while
+            // this paste was in flight, showing "Pasted into X" and then snapping the
+            // pill back to Idle would misreport an active recording.
+            if (_snapshot.State != AppState.Idle)
+            {
+                _logger.LogDebug("Skipping post-paste snapshot: FSM is {State}.", _snapshot.State);
+                return;
+            }
             _state.OnNext(new CoordinatorSnapshot(AppState.Idle, PostPaste: info));
-        }));
+        });
     }
 
-    private async Task HandleFailureAsync(string error, string? failedWavPath)
+    private async Task HandleFailureAsync(string error, string? failedWavPath, DateTimeOffset startedAt)
     {
         _logger.LogWarning("Transcription failed: {Error}", error);
 
@@ -384,13 +508,13 @@ public sealed class AppCoordinator : IDisposable
         string? retainedPath = null;
         if (failedWavPath is not null && File.Exists(failedWavPath))
         {
-            Directory.CreateDirectory(AppPaths.FailedDir);
-            retainedPath = Path.Combine(AppPaths.FailedDir, Path.GetFileName(failedWavPath));
             try
             {
+                Directory.CreateDirectory(_failedDir);
+                retainedPath = Path.Combine(_failedDir, Path.GetFileName(failedWavPath));
                 File.Move(failedWavPath, retainedPath, overwrite: true);
             }
-            catch (IOException ex)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 _logger.LogDebug(ex, "Failed to retain failed wav.");
                 retainedPath = failedWavPath;
@@ -401,7 +525,7 @@ public sealed class AppCoordinator : IDisposable
         {
             await AppendHistoryAsync(
                 text: $"[failed] {error}",
-                duration: DateTimeOffset.UtcNow - _recordingStartedAt,
+                duration: DateTimeOffset.UtcNow - startedAt,
                 model: _prefs.Current.Models.ActiveModelId,
                 targetApp: null,
                 status: TranscriptStatus.Failed,
@@ -430,6 +554,22 @@ public sealed class AppCoordinator : IDisposable
         catch (Exception ex) when (ex is Microsoft.Data.Sqlite.SqliteException or IOException)
         {
             _logger.LogWarning(ex, "Failed to append history record.");
+        }
+    }
+
+    private void DeleteQuietly(string? path)
+    {
+        if (path is null || !File.Exists(path))
+        {
+            return;
+        }
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogDebug(ex, "Failed to delete {Wav}.", path);
         }
     }
 }

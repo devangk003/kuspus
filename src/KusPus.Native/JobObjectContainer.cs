@@ -8,6 +8,8 @@ using KusPus.Native.PInvoke;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
+using KusPus.Core.Platform;
+
 namespace KusPus.Native;
 
 /// <summary>

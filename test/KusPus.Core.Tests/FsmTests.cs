@@ -36,12 +36,62 @@ public class FsmTests
     }
 
     [Fact]
-    public void Idle_ToggleFromTray_enters_tap_recording()
+    public void Idle_ToggleFromTray_captures_foreground_and_enters_tap_recording()
     {
         var t = Fsm.Step(Idle, new ToggleFromTray(), Cfg);
 
         t.Next.Should().Be(RecordingTap);
-        t.Effects.Should().Equal(new SideEffect[] { new StartAudioCapture() });
+        t.Effects.Should().Equal(new SideEffect[]
+        {
+            new CaptureForegroundHwnd(),
+            new StartAudioCapture(),
+        });
+    }
+
+    // ── Recording — capture failure ──────────────────────────────────────────
+
+    [Fact]
+    public void RecordingHold_RecordingFailed_aborts_and_reports()
+    {
+        var t = Fsm.Step(RecordingHold, new RecordingFailed("Microphone changed mid-recording."), Cfg);
+
+        t.Next.Should().Be(Idle);
+        t.Effects.Should().Equal(new SideEffect[]
+        {
+            new AbortAudioCapture(),
+            new HandleTranscribeFailure("Microphone changed mid-recording.", null),
+        });
+    }
+
+    [Fact]
+    public void RecordingTap_RecordingFailed_aborts_and_reports()
+    {
+        var t = Fsm.Step(RecordingTap, new RecordingFailed("Failed to open microphone"), Cfg);
+
+        t.Next.Should().Be(Idle);
+        t.Effects.Should().Equal(new SideEffect[]
+        {
+            new AbortAudioCapture(),
+            new HandleTranscribeFailure("Failed to open microphone", null),
+        });
+    }
+
+    [Fact]
+    public void Transcribing_RecordingFailed_is_noop()
+    {
+        var t = Fsm.Step(Transcribing, new RecordingFailed("late"), Cfg);
+
+        t.Next.Should().Be(Transcribing);
+        t.Effects.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Recording_TranscribeFailed_is_noop_use_RecordingFailed_instead()
+    {
+        var t = Fsm.Step(RecordingHold, new TranscribeFailed("x", null), Cfg);
+
+        t.Next.Should().Be(RecordingHold);
+        t.Effects.Should().BeEmpty();
     }
 
     // ── Armed ────────────────────────────────────────────────────────────────
@@ -52,7 +102,7 @@ public class FsmTests
         var t = Fsm.Step(Armed, new ChordReleased(), Cfg);
 
         t.Next.Should().Be(RecordingTap);
-        t.Effects.Should().Equal(new SideEffect[] { new StartAudioCapture() });
+        t.Effects.Should().Equal(new SideEffect[] { new CancelHoldTimer(), new StartAudioCapture() });
     }
 
     [Fact]

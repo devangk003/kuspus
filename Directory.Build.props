@@ -9,6 +9,16 @@
     <AnalysisLevel>latest-recommended</AnalysisLevel>
   </PropertyGroup>
 
+  <!-- Product version — the single source for every build (Windows exe version info,
+       macOS CFBundleShortVersionString, About pages, tray menu). Release pipelines may
+       override it with -p:KusPusVersion=… from the tag. -->
+  <PropertyGroup>
+    <KusPusVersion Condition="'$(KusPusVersion)' == ''">1.5.0</KusPusVersion>
+    <Version>$(KusPusVersion)</Version>
+    <!-- Keep "1.5.0" clean in About (the SDK would otherwise append "+<git sha>"). -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+
   <!-- Test projects use underscore_separated_method_names per xunit convention. -->
   <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
     <NoWarn>$(NoWarn);CA1707</NoWarn>

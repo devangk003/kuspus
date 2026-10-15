@@ -22,13 +22,20 @@ public static class Fsm
                     new CaptureForegroundHwnd(),
                     new StartHoldTimer(config.HoldThresholdMs)),
 
+            // Tray / pill toggle also captures the foreground target so the paste
+            // lands in the window that was focused when recording began, not in
+            // whatever HWND the previous hotkey cycle left behind.
             (AppState.Idle, _, ToggleFromTray _) =>
                 Move(snapshot with { State = AppState.Recording, IsHoldMode = false },
+                    new CaptureForegroundHwnd(),
                     new StartAudioCapture()),
 
             // ── Armed ────────────────────────────────────────────────────────
+            // Cancel the hold timer too: a callback already queued when the next Armed
+            // cycle starts would otherwise flip that press straight into hold mode.
             (AppState.Armed, _, ChordReleased _) =>
                 Move(snapshot with { State = AppState.Recording, IsHoldMode = false },
+                    new CancelHoldTimer(),
                     new StartAudioCapture()),
 
             (AppState.Armed, _, HoldThresholdElapsed _) =>
@@ -55,6 +62,15 @@ public static class Fsm
                 Move(snapshot with { State = AppState.Transcribing, IsHoldMode = false },
                     new StopAudioCapture(),
                     new BeginTranscribe()),
+
+            // ── Recording (either mode) — capture failure ────────────────────
+            // Mic blocked at start, default device changed, or disk full mid-take.
+            // Abort the capture (best-effort) and route through the failure path so
+            // the pill shows the reason and history records it.
+            (AppState.Recording, _, RecordingFailed rf) =>
+                Move(snapshot with { State = AppState.Idle, IsHoldMode = false },
+                    new AbortAudioCapture(),
+                    new HandleTranscribeFailure(rf.Error, null)),
 
             // ── Transcribing ─────────────────────────────────────────────────
             // DeliverTranscript / HandleTranscribeFailure are deliberately coarse-grained:

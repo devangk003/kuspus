@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Sentry;
 
-namespace KusPus.App;
+namespace KusPus.Coordination;
 
 /// <summary>
 /// Opt-in crash reporter per TECH_SPEC §19 + PRD §10.3. Wraps the Sentry SDK in a
@@ -116,7 +116,7 @@ public sealed class CrashReporter : IDisposable
                         _prefs,
                         _loggerFactory?.CreateLogger<EgressAllowlistHandler>())
                     {
-                        InnerHandler = new SocketsHttpHandler(),
+                        InnerHandler = EgressAllowlistHandler.CreateInnerHandler(),
                     };
                 o.SetBeforeSend(BeforeSend);
                 // SentryEvent.Breadcrumbs is read-only from inside BeforeSend, so
@@ -168,19 +168,55 @@ public sealed class CrashReporter : IDisposable
 
         evt.Message = ScrubMessage(evt.Message);
 
+        // Values too, not just keys: a tag/extra value can carry a path or the user name.
+        foreach (var tag in evt.Tags.ToArray())
+        {
+            var scrubbed = CrashScrubber.ScrubString(tag.Value);
+            if (!string.Equals(scrubbed, tag.Value, StringComparison.Ordinal))
+            {
+                evt.SetTag(tag.Key, scrubbed ?? string.Empty);
+            }
+        }
+        foreach (var extra in evt.Extra.ToArray())
+        {
+            if (extra.Value is string str)
+            {
+                var scrubbed = CrashScrubber.ScrubString(str);
+                if (!string.Equals(scrubbed, str, StringComparison.Ordinal))
+                {
+                    evt.SetExtra(extra.Key, scrubbed);
+                }
+            }
+        }
+
         if (evt.SentryExceptions is not null)
         {
             foreach (var ex in evt.SentryExceptions)
             {
                 ex.Value = CrashScrubber.ScrubString(ex.Value);
+                ex.Type = CrashScrubber.ScrubPath(ex.Type); // path-anchored only: a short user name must not mangle type names
+                ex.Module = CrashScrubber.ScrubPath(ex.Module);
                 if (ex.Stacktrace is not null)
                 {
                     foreach (var frame in ex.Stacktrace.Frames)
                     {
                         frame.AbsolutePath = CrashScrubber.ScrubPath(frame.AbsolutePath);
                         frame.FileName = CrashScrubber.ScrubPath(frame.FileName);
+                        frame.Module = CrashScrubber.ScrubPath(frame.Module);
+                        frame.Package = CrashScrubber.ScrubPath(frame.Package);
                     }
                 }
+            }
+        }
+
+        // Native debug images carry absolute binary paths — /Users/<name>/… when the app
+        // runs from ~/Downloads or ~/Applications.
+        if (evt.DebugImages is not null)
+        {
+            foreach (var image in evt.DebugImages)
+            {
+                image.CodeFile = CrashScrubber.ScrubPath(image.CodeFile);
+                image.DebugFile = CrashScrubber.ScrubPath(image.DebugFile);
             }
         }
 

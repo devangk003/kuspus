@@ -1,4 +1,4 @@
-namespace KusPus.Native;
+namespace KusPus.Core.Platform;
 
 /// <summary>Raw chord-level events from <see cref="IHotkeyEngine"/>. See TECH_SPEC §13.</summary>
 public abstract record HotkeyEvent;

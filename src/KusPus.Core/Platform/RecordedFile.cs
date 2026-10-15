@@ -1,4 +1,4 @@
-namespace KusPus.Audio;
+namespace KusPus.Core.Platform;
 
 /// <summary>The output of a completed recording. Returned by <see cref="IAudioRecorder.StopAsync"/>.</summary>
 /// <param name="CappedAtLimit">

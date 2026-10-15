@@ -1,4 +1,4 @@
-namespace KusPus.Audio;
+namespace KusPus.Core.Platform;
 
 /// <summary>Token returned by <see cref="IAudioRecorder.StartAsync"/> identifying the active session.</summary>
 public sealed record RecordingHandle(string WavPath, DateTimeOffset StartedAt);

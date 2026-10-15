@@ -27,23 +27,137 @@ public class ModelManagerTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    private static readonly string[] Section18Models =
+    private static readonly string[] ParakeetFileNames =
+    [
+        "encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt",
+    ];
+
+    private static readonly string[] ManifestModels =
     [
         "ggml-tiny.en",
         "ggml-base.en",
         "ggml-small.en",
         "ggml-medium.en",
         "ggml-large-v3",
+        "parakeet-tdt-0.6b-v2",
+        "parakeet-tdt-0.6b-v3",
     ];
 
     [Fact]
-    public void Embedded_manifest_contains_all_five_models_per_section_18()
+    public void Embedded_manifest_contains_whisper_and_parakeet_models()
     {
         using var client = new HttpClient(new FakeHttpMessageHandler(_ => new HttpResponseMessage()));
         var mgr = new ModelManager(_tempDir, client);
 
-        mgr.Manifest.SchemaVersion.Should().Be(1);
-        mgr.Manifest.Models.Select(m => m.Id).Should().BeEquivalentTo(Section18Models);
+        mgr.Manifest.SchemaVersion.Should().Be(3);
+        mgr.Manifest.Models.Select(m => m.Id).Should().BeEquivalentTo(ManifestModels);
+        mgr.Manifest.Models.Where(m => m.Id.StartsWith("ggml-", StringComparison.Ordinal))
+            .Should().OnlyContain(m => m.Engine == ModelEngine.Whisper && m.Files.Count == 1);
+        var parakeet = mgr.Manifest.Models.Where(m => m.Engine == ModelEngine.Parakeet).ToList();
+        parakeet.Should().HaveCount(2);
+        parakeet.Should().OnlyContain(m => m.Files.Count == 4 && !m.Bundled);
+        parakeet.Should().OnlyContain(m => m.Files.All(f =>
+            f.Url.StartsWith("https://huggingface.co/", StringComparison.Ordinal) && f.Sha256.Length == 64 && f.SizeBytes > 0));
+        parakeet.Should().OnlyContain(m => m.Files.Select(f => f.FileName).SequenceEqual(ParakeetFileNames));
+        mgr.Manifest.Models.Single(m => m.Id == "parakeet-tdt-0.6b-v2").SizeBytes
+            .Should().Be(652184296L + 7257753 + 1739080 + 9384);
+    }
+
+    // ── multi-file (Parakeet-shaped) models ─────────────────────────────────
+
+    private static ModelDescriptor MultiFile(params (string Name, byte[] Bytes)[] files) =>
+        new("multi", "Multi", ModelEngine.Parakeet,
+            files.Select(f => new ModelFile(f.Name, f.Bytes.Length, Sha(f.Bytes), "https://example/" + f.Name)).ToList(),
+            Bundled: false);
+
+    private static string Sha(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+
+    [Fact]
+    public async Task Multi_file_model_downloads_every_file_into_its_own_subdirectory_and_reports_aggregate_progress()
+    {
+        var a = new byte[] { 1, 2, 3, 4 };
+        var b = new byte[] { 9, 8 };
+        var model = MultiFile(("encoder.onnx", a), ("tokens.txt", b));
+        var manifest = new ModelManifest(2, "test", [model]);
+        using var client = new HttpClient(new FakeHttpMessageHandler(req => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(req.RequestUri!.AbsolutePath.EndsWith("encoder.onnx", StringComparison.Ordinal) ? a : b),
+        }));
+        var mgr = new ModelManager(_tempDir, client, manifestOverride: manifest);
+        var reports = new List<DownloadProgress>();
+        var progress = new Progress<DownloadProgress>(reports.Add);
+
+        var result = await mgr.DownloadAsync(model, progress);
+
+        result.Success.Should().BeTrue();
+        var dir = Path.Combine(_tempDir, "multi");
+        result.Value.Should().Be(Path.Combine(dir, "encoder.onnx"));
+        File.ReadAllBytes(Path.Combine(dir, "encoder.onnx")).Should().Equal(a);
+        File.ReadAllBytes(Path.Combine(dir, "tokens.txt")).Should().Equal(b);
+        await Task.Delay(50);
+        reports.Last().Should().Be(new DownloadProgress(6, 6));
+        mgr.IsInstalled(model).Should().BeTrue();
+        (await mgr.IsInstalledAsync(model)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Multi_file_download_skips_files_already_present_with_matching_sha()
+    {
+        var a = new byte[] { 1, 2, 3, 4 };
+        var b = new byte[] { 9, 8 };
+        var model = MultiFile(("encoder.onnx", a), ("tokens.txt", b));
+        var dir = Path.Combine(_tempDir, "multi");
+        Directory.CreateDirectory(dir);
+        File.WriteAllBytes(Path.Combine(dir, "encoder.onnx"), a);
+        var requested = new List<string>();
+        using var client = new HttpClient(new FakeHttpMessageHandler(req =>
+        {
+            requested.Add(req.RequestUri!.AbsolutePath);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(b) };
+        }));
+        var mgr = new ModelManager(_tempDir, client, manifestOverride: new ModelManifest(2, "test", [model]));
+
+        var result = await mgr.DownloadAsync(model);
+
+        result.Success.Should().BeTrue();
+        requested.Should().ContainSingle().Which.Should().EndWith("tokens.txt");
+    }
+
+    [Fact]
+    public void Multi_file_model_is_not_installed_or_resolvable_while_any_file_is_missing()
+    {
+        var model = MultiFile(("encoder.onnx", [1]), ("tokens.txt", [2]));
+        var dir = Path.Combine(_tempDir, "multi");
+        Directory.CreateDirectory(dir);
+        File.WriteAllBytes(Path.Combine(dir, "encoder.onnx"), [1]);
+        var mgr = MakeManager(new ModelManifest(2, "test", [model]));
+
+        mgr.IsInstalled(model).Should().BeFalse();
+        var result = mgr.Resolve("multi", null);
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain("tokens.txt");
+
+        File.WriteAllBytes(Path.Combine(dir, "tokens.txt"), [2]);
+        mgr.IsInstalled(model).Should().BeTrue();
+        var ok = mgr.Resolve("multi", null);
+        ok.Success.Should().BeTrue();
+        ok.Value!.Directory.Should().Be(dir);
+        ok.Value.PathFor("tokens.txt").Should().Be(Path.Combine(dir, "tokens.txt"));
+    }
+
+    [Fact]
+    public void Bundled_directory_is_used_when_the_writable_copy_is_incomplete()
+    {
+        var model = MultiFile(("encoder.onnx", [1]), ("tokens.txt", [2]));
+        var bundledRoot = Path.Combine(_tempDir, "bundled");
+        var bundledDir = Path.Combine(bundledRoot, "multi");
+        Directory.CreateDirectory(bundledDir);
+        File.WriteAllBytes(Path.Combine(bundledDir, "encoder.onnx"), [1]);
+        File.WriteAllBytes(Path.Combine(bundledDir, "tokens.txt"), [2]);
+        using var client = new HttpClient(new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotImplemented)));
+        var mgr = new ModelManager(_tempDir, client, new ModelManifest(2, "test", [model]), bundledModelsDirectory: bundledRoot);
+
+        mgr.Resolve("multi", null).Value!.Directory.Should().Be(bundledDir);
     }
 
     [Fact]
@@ -56,7 +170,7 @@ public class ModelManagerTests : IDisposable
             HfRepoCommit: "test",
             Models: new[]
             {
-                new ModelDescriptor("test", "Test", "test.bin", payload.Length, sha, "https://example/test.bin", false),
+                ModelDescriptor.SingleFile("test", "Test", "test.bin", payload.Length, sha, "https://example/test.bin", false),
             });
 
         string? seenAcceptEncoding = null;
@@ -82,7 +196,7 @@ public class ModelManagerTests : IDisposable
             HfRepoCommit: "test",
             Models: new[]
             {
-                new ModelDescriptor("test", "Test", "test.bin", payload.Length, sha, "https://example/test.bin", false),
+                ModelDescriptor.SingleFile("test", "Test", "test.bin", payload.Length, sha, "https://example/test.bin", false),
             });
 
         // Pre-seed a stale partial download.
@@ -186,7 +300,7 @@ public class ModelManagerTests : IDisposable
             HfRepoCommit: "test",
             Models: new[]
             {
-                new ModelDescriptor("test", "Test", "test.bin", bytes.Length, sha, "https://example/", false),
+                ModelDescriptor.SingleFile("test", "Test", "test.bin", bytes.Length, sha, "https://example/", false),
             });
 
         var mgr = MakeManager(manifestOverride: manifest);
@@ -203,10 +317,7 @@ public class ModelManagerTests : IDisposable
             HfRepoCommit: "test",
             Models: new[]
             {
-                new ModelDescriptor(
-                    "test", "Test", "test.bin", 5,
-                    Sha256: "deadbeef0000000000000000000000000000000000000000000000000000beef",
-                    Url: "https://example/", Bundled: false),
+                ModelDescriptor.SingleFile("test", "Test", "test.bin", 5, "deadbeef0000000000000000000000000000000000000000000000000000beef", "https://example/", false),
             });
 
         var mgr = MakeManager(manifestOverride: manifest);
@@ -225,7 +336,7 @@ public class ModelManagerTests : IDisposable
             HfRepoCommit: "test",
             Models: new[]
             {
-                new ModelDescriptor("test", "Test", "test.bin", payload.Length, sha, "https://example/test.bin", false),
+                ModelDescriptor.SingleFile("test", "Test", "test.bin", payload.Length, sha, "https://example/test.bin", false),
             });
 
         using var client = new HttpClient(new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
@@ -250,10 +361,7 @@ public class ModelManagerTests : IDisposable
             HfRepoCommit: "test",
             Models: new[]
             {
-                new ModelDescriptor(
-                    "test", "Test", "test.bin", 5,
-                    Sha256: "deadbeef0000000000000000000000000000000000000000000000000000beef",
-                    Url: "https://example/test.bin", Bundled: false),
+                ModelDescriptor.SingleFile("test", "Test", "test.bin", 5, "deadbeef0000000000000000000000000000000000000000000000000000beef", "https://example/test.bin", false),
             });
 
         using var client = new HttpClient(new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
@@ -278,7 +386,7 @@ public class ModelManagerTests : IDisposable
             HfRepoCommit: "test",
             Models: new[]
             {
-                new ModelDescriptor("test", "Test", "test.bin", 0, "ignored", "https://example/test.bin", false),
+                ModelDescriptor.SingleFile("test", "Test", "test.bin", 0, "ignored", "https://example/test.bin", false),
             });
 
         using var client = new HttpClient(new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)));
@@ -302,7 +410,7 @@ public class ModelManagerTests : IDisposable
             HfRepoCommit: "test",
             Models: new[]
             {
-                new ModelDescriptor("test", "Test", "test.bin", payload.Length, sha, "https://example/test.bin", false),
+                ModelDescriptor.SingleFile("test", "Test", "test.bin", payload.Length, sha, "https://example/test.bin", false),
             });
 
         using var client = new HttpClient(new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
@@ -329,5 +437,47 @@ public class ModelManagerTests : IDisposable
     {
         var client = new HttpClient(new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotImplemented)));
         return new ModelManager(_tempDir, client, manifestOverride);
+    }
+
+    [Fact]
+    public void Manifest_CarriesInfoForEveryModel()
+    {
+        using var client = new HttpClient(new FakeHttpMessageHandler(_ => new HttpResponseMessage()));
+        var mgr = new ModelManager(_tempDir, client);
+
+        foreach (var m in mgr.Manifest.Models)
+        {
+            m.Info.Should().NotBeNull($"{m.Id} needs Models-page metadata");
+            m.Info!.Maker.Should().NotBeNullOrWhiteSpace();
+            m.Info.Description.Should().NotBeNullOrWhiteSpace();
+            m.Info.SpeedTier.Should().BeInRange(1, 5);
+            m.Info.AccuracyTier.Should().BeInRange(1, 5);
+            m.Info.ModelCardUrl.Should().StartWith("https://");
+        }
+        mgr.Manifest.Models.Count(m => m.Info!.Recommended).Should().Be(1);
+    }
+
+    [Fact]
+    public void Remove_DeletesDownloadedFilesAndReportsBytesFreed()
+    {
+        using var client = new HttpClient(new FakeHttpMessageHandler(_ => new HttpResponseMessage()));
+        var mgr = new ModelManager(_tempDir, client);
+        var parakeet = mgr.Manifest.Models.First(m => m.Id == "parakeet-tdt-0.6b-v2");
+        var dir = Path.Combine(_tempDir, parakeet.Subdirectory);
+        Directory.CreateDirectory(dir);
+        foreach (var f in parakeet.Files)
+        {
+            File.WriteAllBytes(Path.Combine(dir, f.FileName), new byte[10]);
+        }
+        mgr.IsInstalled(parakeet).Should().BeTrue();
+        mgr.DownloadedSizeBytes(parakeet).Should().Be(40);
+
+        var result = mgr.Remove(parakeet);
+
+        result.Success.Should().BeTrue();
+        result.Value.Should().Be(40);
+        mgr.IsInstalled(parakeet).Should().BeFalse();
+        Directory.Exists(dir).Should().BeFalse("the model's own folder is dropped once empty");
+        mgr.DownloadedSizeBytes(parakeet).Should().Be(0);
     }
 }

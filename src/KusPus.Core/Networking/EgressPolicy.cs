@@ -10,7 +10,8 @@ namespace KusPus.Core.Networking;
 /// <list type="number">
 ///   <item>Offline Mode ON → block everything.</item>
 ///   <item>Non-HTTPS → block (HTTP allowlist would be meaningless).</item>
-///   <item>Host suffix <c>huggingface.co</c> → allow (model downloads).</item>
+///   <item>Host suffix <c>huggingface.co</c> or <c>hf.co</c> → allow (model downloads;
+///   <c>resolve/</c> URLs redirect to Hugging Face's CDN, e.g. <c>us.aws.cdn.hf.co</c>).</item>
 ///   <item>Sentry ingest host → allow only if crash reports opted in.</item>
 ///   <item>Otherwise → block.</item>
 /// </list>
@@ -39,7 +40,7 @@ public static class EgressPolicy
         }
 
         var host = uri.Host;
-        if (HostMatches(host, "huggingface.co"))
+        if (HostMatches(host, "huggingface.co") || HostMatches(host, "hf.co"))
         {
             return true;
         }

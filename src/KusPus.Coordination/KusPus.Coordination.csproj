@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Platform-neutral glue: AppCoordinator (FSM ↔ live services), the egress
+       allowlist HttpMessageHandler, and the opt-in Sentry crash reporter. Both
+       the WPF app (KusPus.App) and the AppKit app (KusPus.Mac.App) compose
+       their platform services into this one pipeline. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>KusPus.Coordination</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+    <PackageReference Include="Sentry" Version="5.0.0" />
+    <PackageReference Include="System.Reactive" Version="6.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KusPus.Core\KusPus.Core.csproj" />
+    <ProjectReference Include="..\KusPus.Persistence\KusPus.Persistence.csproj" />
+    <ProjectReference Include="..\KusPus.Whisper\KusPus.Whisper.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="KusPus.Coordination.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- In-process NVIDIA Parakeet-TDT engine on sherpa-onnx (Apache-2.0). Kept out of
+       KusPus.Whisper so that project stays free of native dependencies; both apps
+       reference this one and the per-RID runtime package supplies
+       libsherpa-onnx-c-api + onnxruntime for osx-arm64 / win-x64. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>KusPus.Parakeet</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+    <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KusPus.Core\KusPus.Core.csproj" />
+    <ProjectReference Include="..\KusPus.Whisper\KusPus.Whisper.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="KusPus.Parakeet.Tests" />
+  </ItemGroup>
+
+</Project>

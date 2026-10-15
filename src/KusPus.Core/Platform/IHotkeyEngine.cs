@@ -6,7 +6,7 @@
 
 using KusPus.Core.Hotkeys;
 
-namespace KusPus.Native;
+namespace KusPus.Core.Platform;
 
 /// <summary>
 /// Globally observes the keyboard via a WH_KEYBOARD_LL hook and reports chord-level

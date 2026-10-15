@@ -9,6 +9,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using CoreVK = KusPus.Core.Hotkeys.VirtualKey;
 
+using KusPus.Core.Platform;
+
 namespace KusPus.Native;
 
 /// <summary>

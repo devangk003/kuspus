@@ -1,6 +1,8 @@
 using FluentAssertions;
 using Xunit;
 
+using KusPus.Core.Platform;
+
 namespace KusPus.Native.Tests;
 
 /// <summary>

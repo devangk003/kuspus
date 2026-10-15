@@ -212,4 +212,20 @@ public class PrefsStoreTests : IDisposable
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         Converters = { new JsonStringEnumConverter() },
     };
+
+    [Fact]
+    public async Task UpdateAsync_concurrent_updates_do_not_lose_fields()
+    {
+        using var store = new PrefsStore(_settingsPath);
+        var initialAutostart = store.Current.Autostart;
+
+        await Task.WhenAll(
+            store.UpdateAsync(s => s with { Autostart = !s.Autostart }),
+            store.UpdateAsync(s => s with { Audio = s.Audio with { InputDeviceId = "mic-2" } }),
+            store.UpdateAsync(s => s with { Ui = s.Ui with { Theme = s.Ui.Theme } }));
+
+        using var reloaded = new PrefsStore(_settingsPath);
+        reloaded.Current.Audio.InputDeviceId.Should().Be("mic-2");
+        reloaded.Current.Autostart.Should().Be(!initialAutostart);
+    }
 }

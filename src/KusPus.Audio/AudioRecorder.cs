@@ -14,6 +14,8 @@ using NAudio.Dsp;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 
+using KusPus.Core.Platform;
+
 namespace KusPus.Audio;
 
 /// <summary>
@@ -358,36 +360,8 @@ public sealed class AudioRecorder : IAudioRecorder, IDisposable
     /// Computes <paramref name="rms"/>.Length-channel RMS over the given 16-bit mono PCM buffer.
     /// Each output channel covers an equal slice of the buffer. Internal for unit testing.
     /// </summary>
-    internal static void ComputeRms(ReadOnlySpan<byte> pcm16Mono, Span<float> rms)
-    {
-        if (rms.Length == 0)
-        {
-            return;
-        }
-
-        int sampleCount = pcm16Mono.Length / BytesPerSample;
-        int samplesPerWindow = Math.Max(1, sampleCount / rms.Length);
-
-        for (int w = 0; w < rms.Length; w++)
-        {
-            int start = w * samplesPerWindow;
-            int end = Math.Min(start + samplesPerWindow, sampleCount);
-            if (end <= start)
-            {
-                rms[w] = 0f;
-                continue;
-            }
-
-            double sumSq = 0;
-            for (int i = start; i < end; i++)
-            {
-                short s = (short)(pcm16Mono[i * 2] | (pcm16Mono[(i * 2) + 1] << 8));
-                double normalised = s / (double)short.MaxValue;
-                sumSq += normalised * normalised;
-            }
-            rms[w] = (float)Math.Sqrt(sumSq / (end - start));
-        }
-    }
+    internal static void ComputeRms(ReadOnlySpan<byte> pcm16Mono, Span<float> rms) =>
+        KusPus.Core.Audio.AudioLevels.ComputeRms(pcm16Mono, rms);
 
     internal void HandleDefaultDeviceChanged()
     {

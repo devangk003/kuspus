@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-namespace KusPus.Native;
+namespace KusPus.Core.Platform;
 
 /// <summary>
 /// Abstraction for "make sure this child process can't outlive us." Implemented by

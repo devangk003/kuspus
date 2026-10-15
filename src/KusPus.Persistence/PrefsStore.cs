@@ -50,20 +50,44 @@ public sealed class PrefsStore : IPrefsStore, IDisposable
         await _saveLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            EnsureDirectoryExists();
-            var tempPath = _path + ".tmp";
-            var json = JsonSerializer.Serialize(updated, JsonOptions.Default);
-            await File.WriteAllTextAsync(tempPath, json, ct).ConfigureAwait(false);
-            // The constructor always writes settings.json on first run, so by the time
-            // any SaveAsync executes the destination is guaranteed to exist. File.Replace
-            // is atomic on NTFS — see TECH_SPEC §9.5.
-            File.Replace(tempPath, _path, destinationBackupFileName: null);
-            _changes.OnNext(updated);
+            await WriteLockedAsync(updated, ct).ConfigureAwait(false);
         }
         finally
         {
             _saveLock.Release();
         }
+    }
+
+    public async Task<AppSettings> UpdateAsync(Func<AppSettings, AppSettings> mutate, CancellationToken ct = default)
+    {
+        await _saveLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var current = _changes.Value;
+            var next = mutate(current);
+            if (!ReferenceEquals(next, current) && next != current)
+            {
+                await WriteLockedAsync(next, ct).ConfigureAwait(false);
+            }
+            return next;
+        }
+        finally
+        {
+            _saveLock.Release();
+        }
+    }
+
+    private async Task WriteLockedAsync(AppSettings updated, CancellationToken ct)
+    {
+        EnsureDirectoryExists();
+        var tempPath = _path + ".tmp";
+        var json = JsonSerializer.Serialize(updated, JsonOptions.Default);
+        await File.WriteAllTextAsync(tempPath, json, ct).ConfigureAwait(false);
+        // The constructor always writes settings.json on first run, so by the time
+        // any SaveAsync executes the destination is guaranteed to exist. File.Replace
+        // is atomic on NTFS and APFS — see TECH_SPEC §9.5.
+        File.Replace(tempPath, _path, destinationBackupFileName: null);
+        _changes.OnNext(updated);
     }
 
     public async Task ReloadFromDiskAsync(CancellationToken ct = default)

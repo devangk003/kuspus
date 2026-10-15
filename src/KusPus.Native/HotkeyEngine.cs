@@ -14,6 +14,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using CoreVK = KusPus.Core.Hotkeys.VirtualKey;
 
+using KusPus.Core.Platform;
+
 namespace KusPus.Native;
 
 /// <summary>
@@ -59,10 +61,8 @@ public sealed class HotkeyEngine : IHotkeyEngine, IDisposable
     private uint _hookThreadId;
     private volatile bool _shutdownRequested;
 
-    private HotkeyChord _chord = HotkeyChord.Default;
-    private readonly HashSet<CoreVK> _heldModifiers = new();
-    private bool _heldChordKey;
-    private bool _chordEngaged;
+    // Chord detection itself is platform-neutral and shared with the macOS engine.
+    private readonly ChordTracker _tracker = new();
 
     public HotkeyEngine(ILogger<HotkeyEngine>? logger = null)
     {
@@ -125,24 +125,12 @@ public sealed class HotkeyEngine : IHotkeyEngine, IDisposable
     {
         lock (_stateLock)
         {
-            // Idempotent: if the chord didn't actually change, preserve held-modifier
-            // state so a runtime settings save (Preferences UI in Phase 9+) doesn't
-            // wipe mid-chord state and leave hold-mode stranded in 'engaged' forever.
-            if (ChordsEqual(_chord, chord))
-            {
-                return;
-            }
-            _chord = chord;
-            _heldModifiers.Clear();
-            _heldChordKey = false;
-            _chordEngaged = false;
+            // ChordTracker.SetChord is idempotent: an unchanged chord preserves
+            // held-modifier state so a runtime settings save doesn't wipe mid-chord
+            // state and leave hold-mode stranded in 'engaged' forever.
+            _tracker.SetChord(chord);
         }
     }
-
-    private static bool ChordsEqual(HotkeyChord a, HotkeyChord b) =>
-        a.Modifiers.Count == b.Modifiers.Count &&
-        a.Modifiers.All(b.Modifiers.Contains) &&
-        a.Key == b.Key;
 
     public void Dispose()
     {
@@ -235,69 +223,35 @@ public sealed class HotkeyEngine : IHotkeyEngine, IDisposable
     internal bool ProcessKey(CoreVK key, bool isKeyDown)
     {
         bool isKeyUp = !isKeyDown;
-        List<HotkeyEvent>? toEmit = null;
+        IReadOnlyList<HotkeyEvent> toEmit;
         bool consume = false;
 
         lock (_stateLock)
         {
-            var chord = _chord;
-            bool isChordModifier = chord.Modifiers.Contains(key);
-            bool isChordKey = chord.Key.HasValue && chord.Key.Value == key;
-            bool wasEngaged = _chordEngaged;
+            toEmit = _tracker.Step(key, isKeyDown);
 
-            // Update held-state.
-            if (isChordModifier)
+            // LWin-suppression (menu-mask-key idiom, AHK #MenuMaskKey): if the
+            // chord just disengaged because the user released a Windows key,
+            // inject a stray Ctrl tap so Windows sees "other input between
+            // LWin↓ and LWin↑" and skips the Start menu. The LWin keyup itself
+            // is NOT consumed — the OS needs to see it so its internal "Win is
+            // held" state clears. Otherwise Win stays stuck-down in OS state
+            // and the next SendInput(Ctrl+V) reads as Win+Ctrl+V (opens Action
+            // Center / Clipboard History) and every subsequent keystroke
+            // becomes a Win+key system shortcut.
+            if (isKeyUp
+                && (key == CoreVK.LeftWin || key == CoreVK.RightWin)
+                && toEmit.Any(e => e is ChordReleased))
             {
-                if (isKeyDown) { _heldModifiers.Add(key); } else { _heldModifiers.Remove(key); }
-            }
-            if (isChordKey)
-            {
-                _heldChordKey = isKeyDown;
-            }
-
-            bool allModsHeld =
-                chord.Modifiers.Count > 0 &&
-                chord.Modifiers.All(m => _heldModifiers.Contains(m));
-            bool engaged = allModsHeld && (chord.Key.HasValue ? _heldChordKey : true);
-
-            if (engaged && !wasEngaged)
-            {
-                _chordEngaged = true;
-                (toEmit ??= []).Add(new ChordEngaged());
-            }
-            else if (!engaged && wasEngaged)
-            {
-                _chordEngaged = false;
-                (toEmit ??= []).Add(new ChordReleased());
-
-                // LWin-suppression (menu-mask-key idiom, AHK #MenuMaskKey): if the
-                // chord just disengaged because the user released a Windows key,
-                // inject a stray Ctrl tap so Windows sees "other input between
-                // LWin↓ and LWin↑" and skips the Start menu. The LWin keyup itself
-                // is NOT consumed — the OS needs to see it so its internal "Win is
-                // held" state clears. Otherwise Win stays stuck-down in OS state
-                // and the next SendInput(Ctrl+V) reads as Win+Ctrl+V (opens Action
-                // Center / Clipboard History) and every subsequent keystroke
-                // becomes a Win+key system shortcut.
-                if (isKeyUp && (key == CoreVK.LeftWin || key == CoreVK.RightWin))
-                {
-                    InjectControlTap();
-                }
-            }
-            else if (engaged && isKeyDown && !isChordModifier && !isChordKey)
-            {
-                (toEmit ??= []).Add(new OtherKeyPressed());
+                InjectControlTap();
             }
         }
 
         // Emit OUTSIDE the lock so subscriber callbacks can't deadlock against
         // a re-entrant SetChord / Stop / etc.
-        if (toEmit is not null)
+        foreach (var evt in toEmit)
         {
-            foreach (var evt in toEmit)
-            {
-                _events.OnNext(evt);
-            }
+            _events.OnNext(evt);
         }
 
         return consume;
