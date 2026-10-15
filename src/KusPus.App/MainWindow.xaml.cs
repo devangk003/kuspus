@@ -12,6 +12,8 @@ using System.Windows.Threading;
 using KusPus.Core.Hotkeys;
 using KusPus.Core.Settings;
 using KusPus.Core.State;
+using KusPus.Core.Platform;
+using KusPus.Coordination;
 using KusPus.Native;
 using KusPus.Persistence;
 using KusPus.Whisper;
@@ -56,8 +58,8 @@ public partial class MainWindow : Window
     private readonly IModelManager _models;
     private readonly IHistoryStore _history;
     private readonly AppCoordinator _coordinator;
-    private readonly KusPus.Audio.IAudioRecorder _audio;
-    private readonly IWhisperRunner _whisper;
+    private readonly IAudioRecorder _audio;
+    private readonly ITranscriber _whisper;
     private readonly ILogger<MainWindow> _logger;
     private bool _loaded;
     private bool _allowClose;
@@ -95,8 +97,8 @@ public partial class MainWindow : Window
         IModelManager models,
         IHistoryStore history,
         AppCoordinator coordinator,
-        KusPus.Audio.IAudioRecorder audio,
-        IWhisperRunner whisper,
+        IAudioRecorder audio,
+        ITranscriber whisper,
         ILogger<MainWindow>? logger = null)
     {
         _prefs = prefs;
@@ -651,7 +653,7 @@ public partial class MainWindow : Window
         {
             // PrefsStore.Changes pipes through AppCoordinator.OnSettingsChanged →
             // IHotkeyEngine.SetChord(new chord). No need to call SetChord here.
-            await _prefs.SaveAsync(next).ConfigureAwait(true);
+            await _prefs.UpdateAsync(s => s with { Hotkey = next.Hotkey with { HoldThresholdMs = s.Hotkey.HoldThresholdMs } }).ConfigureAwait(true);
         }
         catch (System.IO.IOException ex)
         {
@@ -923,7 +925,7 @@ public partial class MainWindow : Window
 #pragma warning restore CA1848, CA1873
         try
         {
-            await _prefs.SaveAsync(next).ConfigureAwait(true);
+            await _prefs.UpdateAsync(s => s with { Audio = s.Audio with { InputDeviceId = next.Audio.InputDeviceId } }).ConfigureAwait(true);
             // If the level meter is currently running, restart it so the new
             // device takes effect immediately for the live preview.
             if (_audioMeterCapture is not null)
@@ -1348,7 +1350,11 @@ public partial class MainWindow : Window
         ["ggml-small.en"] = "Balanced",
         ["ggml-medium.en"] = "Accurate",
         ["ggml-large-v3"] = "Most accurate · multilingual",
+        ["parakeet-tdt-0.6b-v2"] = "Fast · most accurate · punctuation",
+        ["parakeet-tdt-0.6b-v3"] = "Fast · most accurate · 25 languages",
     };
+
+    private static string EngineLabel(ModelDescriptor m) => m.Engine == ModelEngine.Parakeet ? "Parakeet" : "Whisper";
 
     // §13.5 P1-4 — per-model download state. Only entries for in-progress or
     // failed downloads exist; success/idle are derived from on-disk presence in
@@ -1371,17 +1377,17 @@ public partial class MainWindow : Window
         var activeId = _prefs.Current.Models.ActiveModelId;
         var manifest = _models.Manifest;
 
-        // §13.5 P2-8: drop the unreachable "(none)" branch — ActiveModelId is
-        // always a valid manifest id by data flow (DefaultSettings seeds it).
-        var active = manifest.Models.First(m => m.Id == activeId);
+        // "custom" (a user-supplied whisper file) is a valid ActiveModelId that has no
+        // manifest row — fall back to the bundled entry rather than throwing.
+        var active = manifest.Models.FirstOrDefault(m => m.Id == activeId) ?? manifest.Models[0];
         ActiveModelText.Text =
-            $"{active.DisplayName} · {FormatSize(active.SizeBytes)} · {SpeedLabel(active.Id)}";
+            $"{active.DisplayName} · {EngineLabel(active)} · {FormatSize(active.SizeBytes)} · {SpeedLabel(active.Id)}";
 
         ModelsList.Children.Clear();
         for (int i = 0; i < manifest.Models.Count; i++)
         {
             var m = manifest.Models[i];
-            bool installed = File.Exists(System.IO.Path.Combine(AppPaths.ModelsDir, m.FileName));
+            bool installed = _models.IsInstalled(m);
             bool isActive = m.Id == activeId;
             ModelsList.Children.Add(BuildModelRow(m, installed, isActive, isLast: i == manifest.Models.Count - 1));
         }
@@ -1423,7 +1429,7 @@ public partial class MainWindow : Window
 
         var subtitle = new TextBlock
         {
-            Text = $"{FormatSize(m.SizeBytes)} · {SpeedLabel(m.Id)}",
+            Text = $"{EngineLabel(m)} · {FormatSize(m.SizeBytes)} · {SpeedLabel(m.Id)}",
             Style = TypeStyle("Type.RowSubtitle"),
         };
 
@@ -1581,7 +1587,7 @@ public partial class MainWindow : Window
 #pragma warning restore CA1848, CA1873
         try
         {
-            await _prefs.SaveAsync(next).ConfigureAwait(true);
+            await _prefs.UpdateAsync(s => s with { Models = s.Models with { ActiveModelId = next.Models.ActiveModelId } }).ConfigureAwait(true);
         }
         catch (System.IO.IOException ex)
         {
@@ -2186,7 +2192,7 @@ public partial class MainWindow : Window
         UpdateOfflineSubtitle(enabled);
         try
         {
-            await _prefs.SaveAsync(next).ConfigureAwait(true);
+            await _prefs.UpdateAsync(s => s with { Privacy = s.Privacy with { OfflineMode = next.Privacy.OfflineMode } }).ConfigureAwait(true);
         }
         catch (System.IO.IOException ex)
         {
@@ -2214,7 +2220,7 @@ public partial class MainWindow : Window
 #pragma warning restore CA1848, CA1873
         try
         {
-            await _prefs.SaveAsync(next).ConfigureAwait(true);
+            await _prefs.UpdateAsync(s => s with { Privacy = s.Privacy with { ReducePillAnimations = next.Privacy.ReducePillAnimations } }).ConfigureAwait(true);
         }
         catch (System.IO.IOException ex)
         {
@@ -2242,7 +2248,7 @@ public partial class MainWindow : Window
 #pragma warning restore CA1848, CA1873
         try
         {
-            await _prefs.SaveAsync(next).ConfigureAwait(true);
+            await _prefs.UpdateAsync(s => s with { Privacy = s.Privacy with { CrashReportsOptIn = next.Privacy.CrashReportsOptIn } }).ConfigureAwait(true);
         }
         catch (System.IO.IOException ex)
         {
@@ -2509,7 +2515,7 @@ public partial class MainWindow : Window
             // Write HKCU\Run first — if it fails (permissions, antivirus lock),
             // we'd rather NOT have a settings.json that lies about the registry.
             AutostartRegistry.Set(enabled);
-            await _prefs.SaveAsync(next).ConfigureAwait(true);
+            await _prefs.UpdateAsync(s => s with { Autostart = next.Autostart }).ConfigureAwait(true);
         }
         catch (System.UnauthorizedAccessException ex)
         {
@@ -2547,7 +2553,7 @@ public partial class MainWindow : Window
 #pragma warning restore CA1848, CA1873
         try
         {
-            await _prefs.SaveAsync(next).ConfigureAwait(true);
+            await _prefs.UpdateAsync(s => s with { Ui = s.Ui with { Theme = next.Ui.Theme } }).ConfigureAwait(true);
         }
         catch (System.IO.IOException ex)
         {

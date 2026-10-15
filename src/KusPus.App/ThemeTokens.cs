@@ -64,20 +64,24 @@ internal static class ThemeTokens
             ["WarningTint"]      = (FromHex("#332B1F"), FromHex("#FFF4E0")),
             ["WarningBorder"]    = (FromHex("#66FFB74D"), FromHex("#66FFB74D")),
 
-            // Pill-specific tokens — used by FloatingPillWindow. Pill body must
-            // adopt the user's theme; gradient is installed separately by
-            // BuildPillSurfaceGradient because it's a LinearGradientBrush.
-            // VisualizerBarActive is ALSO installed separately — light theme gets
-            // a mint gradient to echo the icon.svg bars per user audit feedback.
-            ["PillBorder"]            = (FromHex("#12FFFFFF"), FromHex("#0F000000")),
-            ["PillInnerHighlight"]    = (FromHex("#0DFFFFFF"), FromHex("#B3FFFFFF")),
-            ["VisualizerBarIdle"]     = (FromHex("#47FFFFFF"), FromHex("#40141414")),
+            // Pill-specific tokens — used by FloatingPillWindow. The Wispr-style
+            // capsule is ALWAYS dark regardless of the app theme, so every Pill*
+            // entry carries the same value in both columns. The surface gradient
+            // is installed separately by BuildPillSurfaceGradient because it's a
+            // LinearGradientBrush. Visualizer bars use the Mint token directly.
+            ["PillBorder"]            = (FromHex("#1AFFFFFF"), FromHex("#1AFFFFFF")),
+            ["PillText"]              = (FromHex("#F0FFFFFF"), FromHex("#F0FFFFFF")),
+            ["PillTextMuted"]         = (FromHex("#99FFFFFF"), FromHex("#99FFFFFF")),
+            ["PillIcon"]              = (FromHex("#C8FFFFFF"), FromHex("#C8FFFFFF")),
+            ["PillHoverBg"]           = (FromHex("#22FFFFFF"), FromHex("#22FFFFFF")),
+            ["PillHoverBgStrong"]     = (FromHex("#33FFFFFF"), FromHex("#33FFFFFF")),
+            ["PillDockMicBg"]         = (FromHex("#14FFFFFF"), FromHex("#14FFFFFF")),
 
             // Audio-tab meter (9E UX refresh) — Discord-style track + fill.
             ["MeterTrack"]            = (FromHex("#1AFFFFFF"), FromHex("#1A000000")),
 
-            // Hover surfaces used inside pill's hover-extend buttons + Discord
-            // visualisation. White-tinted in dark, black-tinted in light.
+            // Generic hover surface. White-tinted in dark, black-tinted in light.
+            // (The pill no longer uses it — see PillHoverBg above.)
             ["ButtonHoverBg"]         = (FromHex("#22FFFFFF"), FromHex("#22000000")),
         };
 
@@ -96,59 +100,23 @@ internal static class ThemeTokens
             var color = mode == ThemeApply.Mode.Dark ? pair.Dark : pair.Light;
             appResources[key] = new SolidColorBrush(color);
         }
-        appResources["PillSurface"] = BuildPillSurfaceGradient(mode);
-        appResources["VisualizerBarActive"] = BuildVisualizerBarActive(mode);
+        appResources["PillSurface"] = BuildPillSurfaceGradient();
     }
 
     /// <summary>
-    /// Builds the pill's two-stop vertical gradient per APP_DESIGN §3.1 / §3.2.
-    /// LinearGradientBrush isn't in <see cref="Map"/> because it's compound (two
-    /// stops per theme) and doesn't fit the single-Color-pair shape.
+    /// Builds the pill's two-stop vertical gradient. LinearGradientBrush isn't in
+    /// <see cref="Map"/> because it's compound (two stops) and doesn't fit the
+    /// single-Color-pair shape. Theme-invariant: the capsule is always dark
+    /// (near-opaque charcoal) so mint bars and light text read identically in
+    /// the light and dark app themes.
     /// </summary>
-    /// <summary>
-    /// Light theme: vertical mint gradient on the visualizer bars echoing the
-    /// pearly-mint stops of icon.svg (top off-white → mid pearl → bottom mint),
-    /// scaled to readable contrast against the light pill surface. Dark theme:
-    /// solid bright fill (the historical token value) — gradient mint on dark
-    /// would fight the active visualizer's "voice on top" reading. Per user
-    /// audit feedback that the bars should look like the icon's gradient bars.
-    /// </summary>
-    private static System.Windows.Media.Brush BuildVisualizerBarActive(ThemeApply.Mode mode)
+    private static System.Windows.Media.LinearGradientBrush BuildPillSurfaceGradient()
     {
-        if (mode == ThemeApply.Mode.Dark)
-        {
-            // Solid white-ish, unchanged — matches the original token.
-            return new SolidColorBrush(FromHex("#EBFFFFFF"));
-        }
-        // Light theme — three-stop vertical mint gradient. Alpha climbs from
-        // top (subtle) to bottom (fully readable) so each bar reads as "lit up"
-        // from below, echoing the icon's vertical mint shading.
-        var brush = new System.Windows.Media.LinearGradientBrush(
-            new System.Windows.Media.GradientStopCollection
-            {
-                new System.Windows.Media.GradientStop(FromHex("#664DDBA6"), 0.0),
-                new System.Windows.Media.GradientStop(FromHex("#994DDBA6"), 0.5),
-                new System.Windows.Media.GradientStop(FromHex("#CC1F8762"), 1.0),
-            },
-            new System.Windows.Point(0, 0),
-            new System.Windows.Point(0, 1));
-        brush.Freeze();
-        return brush;
-    }
-
-    private static System.Windows.Media.LinearGradientBrush BuildPillSurfaceGradient(ThemeApply.Mode mode)
-    {
-        // Light theme stops now carry a subtle mint shift at the bottom
-        // (#EAF4EE) to echo the icon.svg's pearly-mint gradient — per the user
-        // audit ask. Dark theme unchanged.
-        var (top, bottom) = mode == ThemeApply.Mode.Dark
-            ? (FromHex("#E0262628"), FromHex("#EB1C1C1E"))
-            : (FromHex("#E8F4F8F4"), FromHex("#EDE0F0E6"));
         return new System.Windows.Media.LinearGradientBrush(
             new System.Windows.Media.GradientStopCollection
             {
-                new System.Windows.Media.GradientStop(top, 0.0),
-                new System.Windows.Media.GradientStop(bottom, 1.0),
+                new System.Windows.Media.GradientStop(FromHex("#F0202022"), 0.0),
+                new System.Windows.Media.GradientStop(FromHex("#F5161618"), 1.0),
             },
             new System.Windows.Point(0, 0),
             new System.Windows.Point(0, 1));

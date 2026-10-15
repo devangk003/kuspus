@@ -11,6 +11,8 @@ using System.Windows.Threading;
 using KusPus.Audio;
 using KusPus.Core.Hotkeys;
 using KusPus.Core.Settings;
+using KusPus.Core.Platform;
+using KusPus.Coordination;
 using KusPus.Native;
 using KusPus.Persistence;
 using KusPus.Whisper;
@@ -45,7 +47,7 @@ public partial class OnboardingWindow : Window
     private readonly IPrefsStore _prefs;
     private readonly IHotkeyEngine _hotkey;
     private readonly IAudioRecorder _audio;
-    private readonly IWhisperRunner _whisper;
+    private readonly ITranscriber _whisper;
     private readonly IModelManager _models;
     private readonly ILogger<OnboardingWindow> _logger;
 
@@ -75,7 +77,7 @@ public partial class OnboardingWindow : Window
         IPrefsStore prefs,
         IHotkeyEngine hotkey,
         IAudioRecorder audio,
-        IWhisperRunner whisper,
+        ITranscriber whisper,
         IModelManager models,
         ILogger<OnboardingWindow>? logger = null)
     {
@@ -207,7 +209,7 @@ public partial class OnboardingWindow : Window
             {
                 Onboarding = current.Onboarding with { Completed = completed },
             };
-            await _prefs.SaveAsync(next).ConfigureAwait(true);
+            await _prefs.UpdateAsync(s => s with { Onboarding = s.Onboarding with { Completed = next.Onboarding.Completed } }).ConfigureAwait(true);
 #pragma warning disable CA1848, CA1873
             _logger.LogInformation("Onboarding closed — completed={Completed}.", completed);
 #pragma warning restore CA1848, CA1873
@@ -413,7 +415,7 @@ public partial class OnboardingWindow : Window
         };
         try
         {
-            await _prefs.SaveAsync(next).ConfigureAwait(true);
+            await _prefs.UpdateAsync(s => s with { Hotkey = next.Hotkey with { HoldThresholdMs = s.Hotkey.HoldThresholdMs } }).ConfigureAwait(true);
         }
         catch (System.IO.IOException ex)
         {
@@ -789,7 +791,7 @@ public partial class OnboardingWindow : Window
         try
         {
             AutostartRegistry.Set(enabled);
-            await _prefs.SaveAsync(current with { Autostart = enabled }).ConfigureAwait(true);
+            await _prefs.UpdateAsync(s => s with { Autostart = enabled }).ConfigureAwait(true);
         }
         catch (System.UnauthorizedAccessException ex)
         {
@@ -830,9 +832,9 @@ public partial class OnboardingWindow : Window
         }
         try
         {
-            await _prefs.SaveAsync(current with
+            await _prefs.UpdateAsync(s => s with
             {
-                Privacy = current.Privacy with { CrashReportsOptIn = enabled },
+                Privacy = s.Privacy with { CrashReportsOptIn = enabled },
             }).ConfigureAwait(true);
         }
         catch (System.IO.IOException ex)
@@ -1163,7 +1165,7 @@ public partial class OnboardingWindow : Window
 #pragma warning restore CA1848, CA1873
         try
         {
-            await _prefs.SaveAsync(next).ConfigureAwait(true);
+            await _prefs.UpdateAsync(s => s with { Audio = s.Audio with { InputDeviceId = next.Audio.InputDeviceId } }).ConfigureAwait(true);
             // Re-open the meter on the new device so the user sees the level
             // jump for the device they actually chose.
             StopMicCheck();

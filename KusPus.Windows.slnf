@@ -1,0 +1,22 @@
+{
+  "solution": {
+    "path": "KusPus.slnx",
+    "projects": [
+      "src/KusPus.App/KusPus.App.csproj",
+      "src/KusPus.Audio/KusPus.Audio.csproj",
+      "src/KusPus.Coordination/KusPus.Coordination.csproj",
+      "src/KusPus.Core/KusPus.Core.csproj",
+      "src/KusPus.Native/KusPus.Native.csproj",
+      "src/KusPus.Parakeet/KusPus.Parakeet.csproj",
+      "src/KusPus.Persistence/KusPus.Persistence.csproj",
+      "src/KusPus.Whisper/KusPus.Whisper.csproj",
+      "test/KusPus.Audio.Tests/KusPus.Audio.Tests.csproj",
+      "test/KusPus.Coordination.Tests/KusPus.Coordination.Tests.csproj",
+      "test/KusPus.Core.Tests/KusPus.Core.Tests.csproj",
+      "test/KusPus.Native.Tests/KusPus.Native.Tests.csproj",
+      "test/KusPus.Parakeet.Tests/KusPus.Parakeet.Tests.csproj",
+      "test/KusPus.Persistence.Tests/KusPus.Persistence.Tests.csproj",
+      "test/KusPus.Whisper.Tests/KusPus.Whisper.Tests.csproj"
+    ]
+  }
+}

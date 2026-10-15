@@ -47,9 +47,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\KusPus.Core\KusPus.Core.csproj" />
+    <ProjectReference Include="..\KusPus.Coordination\KusPus.Coordination.csproj" />
     <ProjectReference Include="..\KusPus.Native\KusPus.Native.csproj" />
     <ProjectReference Include="..\KusPus.Audio\KusPus.Audio.csproj" />
     <ProjectReference Include="..\KusPus.Whisper\KusPus.Whisper.csproj" />
+    <ProjectReference Include="..\KusPus.Parakeet\KusPus.Parakeet.csproj" />
     <ProjectReference Include="..\KusPus.Persistence\KusPus.Persistence.csproj" />
   </ItemGroup>
 
@@ -68,45 +70,24 @@
     <Resource Include="..\..\icons\icon.svg" Link="icon.svg" />
   </ItemGroup>
 
-  <!-- Phase 12 Cluster 5: SHA-256 propagation from installer/payload/whisper/SHA256SUMS
-       into a build-time constant the runtime integrity check consumes.
+  <!-- SHA-256 of whisper.exe → BuildConstants.ExpectedWhisperSha256. Shared
+       target (also used by KusPus.Mac.App); see build/WhisperSha.targets. -->
+  <PropertyGroup>
+    <KusPusWhisperShaFile>$(MSBuildThisFileDirectory)..\..\installer\payload\whisper\SHA256SUMS</KusPusWhisperShaFile>
+    <KusPusWhisperShaRegex>([0-9a-f]{64})\s+whisper\.exe</KusPusWhisperShaRegex>
+  </PropertyGroup>
+  <Import Project="..\..\build\WhisperSha.targets" />
 
-       On release builds, tools/build-whisper-windows.ps1 has already populated
-       SHA256SUMS by the time this target runs. We grep the line for whisper.exe
-       and emit a generated .cs file with `internal const string BuildSha`.
-       AppPaths.ExpectedWhisperSha256 returns the env-var override if set, else
-       this constant.
-
-       On dev builds (no SHA256SUMS, or whisper.exe not in it), the constant is
-       empty and WhisperRunner's integrity check is a no-op — dev mode skip.
-
-       Incremental: Inputs/Outputs make MSBuild skip the regen if SHA256SUMS
-       hasn't changed since the last .g.cs write. -->
-  <Target Name="EmitWhisperShaConstant"
-          BeforeTargets="BeforeCompile;CoreCompile">
-    <PropertyGroup>
-      <_KusPusShaFile>$(MSBuildThisFileDirectory)..\..\installer\payload\whisper\SHA256SUMS</_KusPusShaFile>
-      <_KusPusShaCsFile>$(IntermediateOutputPath)WhisperSha.g.cs</_KusPusShaCsFile>
-      <_KusPusShaText Condition="Exists('$(_KusPusShaFile)')">$([System.IO.File]::ReadAllText('$(_KusPusShaFile)'))</_KusPusShaText>
-      <_KusPusWhisperSha>$([System.Text.RegularExpressions.Regex]::Match('$(_KusPusShaText)', '([0-9a-f]{64})\s+whisper\.exe').Groups[1].Value)</_KusPusWhisperSha>
-    </PropertyGroup>
-    <!-- Always write the file (even if SHA is empty) so the Compile item below
-         finds something to include. Empty SHA → dev-mode skip in AppPaths.
-         Inputs/Outputs OMITTED on purpose — we want this target to run every
-         build so the Compile item gets dynamically added; the WriteLinesToFile
-         task is itself a fast no-op when the content matches. -->
-    <MakeDir Directories="$(IntermediateOutputPath)" />
-    <WriteLinesToFile File="$(_KusPusShaCsFile)"
-                      Overwrite="true"
-                      Lines="// &lt;auto-generated /&gt; — produced by EmitWhisperShaConstant in KusPus.App.csproj.;namespace KusPus.App%3B;internal static class BuildConstants;%7B;    public const string ExpectedWhisperSha256 = &quot;$(_KusPusWhisperSha)&quot;%3B;%7D" />
-    <Message Text="EmitWhisperShaConstant: whisper.exe SHA = '$(_KusPusWhisperSha)' → $(_KusPusShaCsFile)"
-             Importance="normal" />
-    <!-- Add the generated file to @(Compile) AT TARGET-RUN TIME so it bypasses
-         the parse-time evaluation of static <Compile Include> items, which
-         would have Condition'd it out on the first clean build before this
-         target ever runs. -->
+  <!-- sherpa-onnx natives (Parakeet engine) ship beside the exe instead of being
+       packed into the single-file bundle: IncludeNativeLibrariesForSelfExtract would
+       otherwise extract ~10 MB to %TEMP% on first launch and load onnxruntime from
+       there. Keeping them side-by-side also keeps Defender/AV scanning predictable. -->
+  <Target Name="KeepSherpaNativeSideBySide" AfterTargets="ComputeResolvedFilesToPublishList">
     <ItemGroup>
-      <Compile Include="$(_KusPusShaCsFile)" Visible="false" />
+      <ResolvedFileToPublish Update="@(ResolvedFileToPublish)"
+                             Condition="'%(Filename)%(Extension)' == 'sherpa-onnx-c-api.dll' Or '%(Filename)%(Extension)' == 'onnxruntime.dll'">
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      </ResolvedFileToPublish>
     </ItemGroup>
   </Target>
 

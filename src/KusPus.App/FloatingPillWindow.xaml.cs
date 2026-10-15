@@ -14,56 +14,50 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 // System.Drawing types leak in via UseWindowsForms — alias the WPF shapes/media we use.
 using WpfRectangle = System.Windows.Shapes.Rectangle;
-using WpfColor = System.Windows.Media.Color;
-using WpfSolidColorBrush = System.Windows.Media.SolidColorBrush;
 using WpfPoint = System.Windows.Point;
 
 namespace KusPus.App;
 
 /// <summary>
-/// Floating pill window per <c>docs/PILL_DESIGN.md</c> (the §10 hover-extend override
-/// makes this hit-testable rather than click-through, and adds the close + settings
-/// buttons that appear on hover).
+/// Floating Wispr-style bar. A fixed-size (352×84) fully transparent layered
+/// window that never resizes; the dark capsule animates <em>inside</em> it via
+/// three DependencyProperties (<see cref="CapsuleWidth"/>, <see cref="CapsuleHeight"/>,
+/// <see cref="DockReveal"/>) — see <see cref="ApplyGeometry"/>, the single source
+/// of truth for the capsule's target geometry.
 ///
-/// Design coverage (full spec):
+/// Visual states (all derived from <see cref="CoordinatorSnapshot"/>):
 /// <list type="bullet">
-/// <item>Surface (§1.1, §3.1, §3.3) — 200×56, 8px corners via DWM, dark gradient,
-///   1px hairline border, drop shadow, inner top highlight.</item>
-/// <item>Mica backdrop (§3.3) on Win11 22H2+ via <c>DWMWA_SYSTEMBACKDROP_TYPE</c>;
-///   gracefully falls back to the gradient on older Windows.</item>
-/// <item>Five-state machine (§2) — Hidden (resting), Recording, Transcribing,
-///   Confirmed (1 s hold), Error (2 s hold).</item>
-/// <item>20-bar visualizer (§4) with the damped target/value motion model from
-///   §4.2 — center-weighted, per-bar damp rates, real audio levels (when available)
-///   override the simulated speak envelope.</item>
-/// <item>Accent line (§3.4) — mint gradient with glow, opacity per state.</item>
-/// <item>Motion (§5) — 120 ms appear/disappear fade, 150 ms content crossfade,
-///   confirmation choreography per §5.1, instant accent-color shift on error.</item>
-/// <item>Positioning (§1.2, §6.5) — bottom-center on the monitor containing the
-///   foreground window, 40 DIP above work-area bottom, per-monitor DPI math from 8A.</item>
-/// <item>No focus theft (§6.3) — <c>WS_EX_NOACTIVATE</c>. Hidden from taskbar/Alt-Tab
-///   (§1.2) — <c>WS_EX_TOOLWINDOW</c>.</item>
-/// <item>Hover-extend (§10) — width animates 200→280 over 150 ms, button panel
-///   fades in. <c>WS_EX_TRANSPARENT</c> is intentionally NOT applied.</item>
+/// <item>Idle — a 56×8 dark handle at the bottom-centre of the work area, 10 DIP
+///   above the taskbar. Nothing else visible.</item>
+/// <item>Armed — 160×36 capsule, 20 mint bars at minimum height (dotted line).</item>
+/// <item>Recording — bars follow the damped target/value motion model; real audio
+///   levels (when available) override the simulated speak envelope.</item>
+/// <item>Transcribing — bars collapse to dots and shimmer (travelling opacity wave).</item>
+/// <item>Confirmed — instant collapse to the handle + a 600 ms mint flash. No text.</item>
+/// <item>Error — capsule sized to the reason text, red dot + reason, 2 s hold.</item>
+/// <item>Hover / Pinned — 320×36 capsule with the hotkey hint, Pin + Wand corner
+///   buttons, and the 22 DIP dock (Record, Mic chooser, Settings, Quit) sliding
+///   out below. Pin keeps it open after the cursor leaves.</item>
 /// </list>
 ///
-/// Out-of-spec / deferred until the Settings UI lands (Phase 9+):
-/// - Accent colour picker (Mint hardcoded; spec §3.4 Amber/Azure/Violet alternates).
-/// - Live light/dark theme switching (dark-only for v1; PILL_DESIGN §3.2 light theme).
-/// - Reduced-motion preference gating (§5.3) — pill always animates.
-/// - Confirmed-state radial mask on the visualizer (§4.3) — bars hide entirely
-///   during Confirmed instead.
+/// Surface is always dark regardless of the app theme (Pill* tokens in
+/// <see cref="ThemeTokens"/>). Alpha-0 window pixels are OS click-through, so
+/// clicks beside the handle reach the window underneath; <c>HoverPad</c> (alpha
+/// 1/255) gives the 8 DIP handle a usable hover target.
+///
+/// Positioning — bottom-centre of the monitor containing the foreground window,
+/// per-monitor DPI math. Remembered per-monitor positions and drag both work on
+/// the <em>anchor</em> (bottom-centre of the handle) so the bar stays centred at
+/// every capsule size. No focus theft (<c>WS_EX_NOACTIVATE</c>), hidden from
+/// taskbar/Alt-Tab (<c>WS_EX_TOOLWINDOW</c>).
+///
+/// Motion — expand 180 ms cubic ease-out, collapse 120 ms cubic ease-in, 150 ms
+/// content crossfades. Reduce-animations (user toggle OR Windows "Show
+/// animations" off) snaps every resize and freezes the shimmer.
 /// </summary>
 public partial class FloatingPillWindow : Window
 {
-    // ── DWM ─────────────────────────────────────────────────────────────────
-    private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
-    private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
-    private const int DWMWA_SYSTEMBACKDROP_TYPE = 38;
-    private const int DWMWCP_ROUND = 2;
-    private const int DWMSBT_TRANSIENTWINDOW = 3;
-
-    // ── User32 extended styles (NO WS_EX_TRANSPARENT per §10.2) ─────────────
+    // ── User32 extended styles (NO WS_EX_TRANSPARENT — the capsule is hit-testable) ──
     private const int GWL_EXSTYLE = -20;
     private const int WS_EX_TOOLWINDOW = 0x00000080;
     private const int WS_EX_NOACTIVATE = 0x08000000;
@@ -76,9 +70,6 @@ public partial class FloatingPillWindow : Window
     {
         EffectiveDpi = 0,
     }
-
-    [DllImport("dwmapi.dll")]
-    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
 
     [DllImport("user32.dll")]
     private static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
@@ -144,18 +135,41 @@ public partial class FloatingPillWindow : Window
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetMonitorInfoExW(IntPtr hMonitor, ref MONITORINFOEX lpmi);
 
-    // ── Visualizer geometry (§4.1) ──────────────────────────────────────────
+    // ── Visualizer geometry ─────────────────────────────────────────────────
     private const int BarCount = 20;
     private const double BarWidth = 3.0;
-    private const double BarGap = 4.0;
-    private const double BarMinHeight = 4.0;
-    private const double BarMaxHeight = 26.0;
-    private const double TrackHeight = 28.0;
+    private const double BarGap = 3.0;
+    private const double BarMinHeight = 3.0;
+    private const double BarMaxHeight = 22.0;
+    private const double TrackHeight = 24.0;
 
-    // ── Motion durations (§5) ───────────────────────────────────────────────
+    // ── Capsule geometry (DIP). Window = HoverW + 2·16 pad wide (352),
+    //    ChipH + DockH + 16 pad + PadBottom tall (84) — the 16 DIP side/top pad
+    //    is the Root grid's Margin in XAML; the window never resizes. ──
+    private const double HandleW = 56;
+    private const double HandleH = 8;
+    private const double ChipH = 36;
+    private const double RecordW = 160;
+    private const double HoverW = 320;
+    private const double DockH = 22;
+    // Default anchor sits this far above the work-area bottom.
+    private const double EdgeGap = 10;
+    // Bottom pad under the handle (Root grid's bottom Margin) — the anchor is
+    // this far above the window's bottom edge.
+    private const double PadBottom = 10;
+    // HoverPad outgrows the capsule by this much (both axes) so the 8 DIP
+    // handle has a forgiving hover target.
+    private const double HoverPadSlackW = 24;
+    private const double HoverPadSlackH = 12;
+
+    // ── Motion durations ────────────────────────────────────────────────────
+    private const int ExpandMs = 180;
+    private const int CollapseMs = 120;
+    private const int FlashMs = 600;
     private static readonly Duration AppearDuration = new(TimeSpan.FromMilliseconds(120));
     private static readonly Duration ContentCrossfade = new(TimeSpan.FromMilliseconds(150));
-    private static readonly Duration HoverExtendDuration = new(TimeSpan.FromMilliseconds(150));
+    private static readonly Duration PinFade = new(TimeSpan.FromMilliseconds(180));
+    private static readonly Duration PinRotate = new(TimeSpan.FromMilliseconds(220));
 
     private ILogger<FloatingPillWindow> _logger = NullLogger<FloatingPillWindow>.Instance;
     private Action? _onClose;
@@ -173,31 +187,77 @@ public partial class FloatingPillWindow : Window
     private float[]? _lastRealLevels;
     private bool _isRecording;
     private bool _renderingHooked;
-    // Phase 2: visualizer modes drive both the motion model and which content
-    // panel is shown. Off — bars silent, IdleContent (SVG+wordmark) visible.
-    // Recording — voice envelope motion, "RECORDING" label.
-    // HoverIdle — low-amplitude traveling sine, "IDLE · HOLD TO DICTATE" label.
-    private enum VisualizerMode { Off, Recording, HoverIdle }
+    // Off — bars hidden (Idle / Confirmed / Error / Hidden).
+    // Dots — Armed: bars pinned at minimum height, full opacity (dotted line).
+    // Recording — voice envelope motion.
+    // Shimmer — Transcribing: dots with a travelling opacity wave.
+    private enum VisualizerMode { Off, Dots, Recording, Shimmer }
     private VisualizerMode _visualizerMode = VisualizerMode.Off;
-    // Phase tracker for the hover-idle traveling sine wave. Advances each frame
-    // by 2π / (2.4 s) so the wave completes a full traversal every ~2.4 s.
-    private double _hoverIdleWavePhase;
+    // Phase tracker for the shimmer wave. Advances each frame by 2π / 1.2 s.
+    private double _shimmerPhase;
 
     // ── State machine ───────────────────────────────────────────────────────
-    // Idle is a dev-override (CLAUDE.md deviation): spec §6.1 wants the pill hidden
-    // when not in an active state; user requested always-visible until the Settings
-    // modal makes the close path discoverable elsewhere.
-    private enum PillVisual { Hidden, Idle, Recording, Transcribing, Confirmed, Error }
+    private enum PillVisual { Hidden, Idle, Armed, Recording, Transcribing, Confirmed, Error }
     private PillVisual _currentVisual = PillVisual.Hidden;
     private DispatcherTimer? _postPasteTimer;
 
     // Session-only — keyed by MONITORINFOEX.szDevice (e.g. "\\.\DISPLAY1"). Cleared
-    // on every fresh process start per user spec ("forget on close"). A dictation
-    // started on a monitor with no entry uses that monitor's bottom-center default.
+    // on every fresh process start per user spec ("forget on close"). Stores the
+    // ANCHOR (bottom-centre of the handle), not the window origin, so the bar
+    // stays centred at every capsule size. A dictation started on a monitor with
+    // no entry uses that monitor's bottom-centre default.
     private readonly Dictionary<string, WpfPoint> _monitorPositions = new(StringComparer.OrdinalIgnoreCase);
 
     // Set during the drag operation so animation overlap doesn't undo the user.
     private bool _isDragging;
+
+    // Tracks which content panels are currently faded in so repeated
+    // UpdateContentVisibility calls (every hover) don't restart crossfades.
+    private readonly Dictionary<FrameworkElement, bool> _shown = new();
+
+    // ── Capsule geometry DPs — animated with DoubleAnimation via AnimateDp ──
+
+    public static readonly DependencyProperty CapsuleWidthProperty = DependencyProperty.Register(
+        nameof(CapsuleWidth), typeof(double), typeof(FloatingPillWindow),
+        new PropertyMetadata(HandleW, OnCapsuleWidthChanged));
+
+    public static readonly DependencyProperty CapsuleHeightProperty = DependencyProperty.Register(
+        nameof(CapsuleHeight), typeof(double), typeof(FloatingPillWindow),
+        new PropertyMetadata(HandleH, OnCapsuleHeightChanged));
+
+    public static readonly DependencyProperty DockRevealProperty = DependencyProperty.Register(
+        nameof(DockReveal), typeof(double), typeof(FloatingPillWindow),
+        new PropertyMetadata(0.0, OnDockRevealChanged));
+
+    /// <summary>Capsule width in DIP (56 handle … 320 hover).</summary>
+    public double CapsuleWidth
+    {
+        get => (double)GetValue(CapsuleWidthProperty);
+        set => SetValue(CapsuleWidthProperty, value);
+    }
+
+    /// <summary>Capsule height in DIP (8 handle … 36 chip).</summary>
+    public double CapsuleHeight
+    {
+        get => (double)GetValue(CapsuleHeightProperty);
+        set => SetValue(CapsuleHeightProperty, value);
+    }
+
+    /// <summary>Dock reveal in DIP (0 closed … 22 open). Drives the capsule's bottom margin and the drawer's opacity/slide.</summary>
+    public double DockReveal
+    {
+        get => (double)GetValue(DockRevealProperty);
+        set => SetValue(DockRevealProperty, value);
+    }
+
+    private static void OnCapsuleWidthChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        => ((FloatingPillWindow)d).ApplyCapsuleWidth((double)e.NewValue);
+
+    private static void OnCapsuleHeightChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        => ((FloatingPillWindow)d).ApplyCapsuleHeight((double)e.NewValue);
+
+    private static void OnDockRevealChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        => ((FloatingPillWindow)d).ApplyDockReveal((double)e.NewValue);
 
     public FloatingPillWindow()
     {
@@ -209,15 +269,15 @@ public partial class FloatingPillWindow : Window
     public void SetLogger(ILogger<FloatingPillWindow> logger) => _logger = logger;
 
     /// <summary>
-    /// Hook for the close button (§10.1). The App passes <c>Application.Shutdown</c> here.
+    /// Hook for the dock's Quit button. The App passes <c>Application.Shutdown</c> here.
     /// </summary>
     public void SetCloseAction(Action onClose) => _onClose = onClose;
 
     /// <summary>
-    /// Wires the hover-extended Settings button to a host-supplied callback —
-    /// in App.OnStartup, this is bound to <c>MainWindow.ShowOn("general")</c> so
-    /// the pill's gear button opens the same Preferences modal as the tray menu's
-    /// "Preferences…" item. Per docs/APP_DESIGN.md §13 audit follow-up.
+    /// Wires the dock's Settings button to a host-supplied callback — in
+    /// App.OnStartup, this is bound to <c>MainWindow.ShowOn("general")</c> so the
+    /// pill's gear button opens the same Preferences modal as the tray menu's
+    /// "Preferences…" item.
     /// </summary>
     public void SetSettingsAction(Action onSettings) => _onSettings = onSettings;
 
@@ -230,23 +290,20 @@ public partial class FloatingPillWindow : Window
     /// </summary>
     public void SetRecordToggleAction(Action onToggle) => _onRecordToggle = onToggle;
 
+    /// <summary>
+    /// Sets the hover hint line ("Hold ^ ⊞ to dictate"). The composition root
+    /// feeds it from <c>HotkeyChordFormat.Hint</c> at startup and on every
+    /// settings change so a hotkey edit updates the pill live.
+    /// </summary>
+    public void SetHotkeyHint(string hint) => HintLabel.Text = hint;
+
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         var hwnd = new WindowInteropHelper(this).Handle;
 
-        // Rounded 8 px corners (Win11). Older Windows returns non-success HRESULT — we ignore.
-        int corner = DWMWCP_ROUND;
-        _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
-
-        // Dark-mode hint so DWM tints Mica with the dark palette.
-        int darkMode = 1;
-        _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref darkMode, sizeof(int));
-
-        // Mica (transient). Win11 22H2+. Older Windows returns non-success — gradient fallback.
-        int backdrop = DWMSBT_TRANSIENTWINDOW;
-        _ = DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref backdrop, sizeof(int));
-
-        // No focus theft + hidden from taskbar/Alt-Tab. No WS_EX_TRANSPARENT per §10.2.
+        // No focus theft + hidden from taskbar/Alt-Tab. No WS_EX_TRANSPARENT —
+        // the capsule itself must stay hit-testable; alpha-0 pixels of the
+        // layered window are already click-through at the OS level.
         long ex = GetWindowLongPtr(hwnd, GWL_EXSTYLE).ToInt64();
         ex |= WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
         _ = SetWindowLongPtr(hwnd, GWL_EXSTYLE, new IntPtr(ex));
@@ -255,114 +312,10 @@ public partial class FloatingPillWindow : Window
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         BuildBars();
-        StartSpinner();
-        // PRD G4 dev override: pill is visible from launch and stays visible
-        // between dictations. Transition into Idle so the position math runs
-        // and the surface appears.
+        // The handle is visible from launch and stays visible between
+        // dictations. Transition into Idle so the position math runs and the
+        // surface appears (no-op if Bind() already rendered the Idle snapshot).
         TransitionTo(PillVisual.Idle);
-        // Personality animations default ON; SetReduceAnimations from the
-        // composition root will pause them if user toggle or OS reduced-motion
-        // says so.
-        StartPersonalityAnimations();
-    }
-
-    // ── Personality animations (PILL_DESIGN Phase 3) ─────────────────────
-    //
-    // Breath: subtle ±0.6% scale pulse on a 4 s sine. ScaleTransform on
-    // PillSurface (RenderTransformOrigin=0.5,0.5).
-    // Hue drift: AccentBrush's middle gradient stop cycles mint → seafoam →
-    // cyan → back over 14 s with constant perceived lightness (manual color
-    // picks approximate OKLCH L=0.84, C=0.14 constraint — WPF has no native
-    // OKLCH interpolation).
-    //
-    // Both stored as long-lived Storyboards so SetReduceAnimations can pause
-    // them on toggle without rebuilding.
-
-    private void StartPersonalityAnimations()
-    {
-        if (_personalityRunning || _reduceAnimations || _bars[0] is null)
-        {
-            return;
-        }
-        BuildBreathStoryboard();
-        BuildHueDriftStoryboard();
-        _breathStoryboard?.Begin(this, isControllable: true);
-        _hueStoryboard?.Begin(this, isControllable: true);
-        _personalityRunning = true;
-    }
-
-    private void StopPersonalityAnimations()
-    {
-        if (!_personalityRunning)
-        {
-            return;
-        }
-        // Storyboard.Stop returns BreathScale/AccentBrush to their initial values
-        // (ScaleX/Y=1.0, mint #4DDBA6) so the pill stops at a clean rest pose.
-        _breathStoryboard?.Stop(this);
-        _hueStoryboard?.Stop(this);
-        _personalityRunning = false;
-    }
-
-    private void BuildBreathStoryboard()
-    {
-        if (_breathStoryboard is not null)
-        {
-            return;
-        }
-        var sb = new Storyboard();
-        // 2 s in + 2 s out via AutoReverse = 4 s cycle. SineEase for the
-        // "alive breath" feel.
-        var scaleAnim = new DoubleAnimation
-        {
-            From = 1.0,
-            To = 1.006,
-            Duration = new Duration(TimeSpan.FromSeconds(2)),
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever,
-            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
-        };
-        Storyboard.SetTarget(scaleAnim, BreathScale);
-        // Two clones — one per axis — so storyboard owns both.
-        var xAnim = scaleAnim.Clone();
-        var yAnim = scaleAnim.Clone();
-        Storyboard.SetTargetProperty(xAnim, new PropertyPath(ScaleTransform.ScaleXProperty));
-        Storyboard.SetTargetProperty(yAnim, new PropertyPath(ScaleTransform.ScaleYProperty));
-        Storyboard.SetTarget(xAnim, BreathScale);
-        Storyboard.SetTarget(yAnim, BreathScale);
-        sb.Children.Add(xAnim);
-        sb.Children.Add(yAnim);
-        _breathStoryboard = sb;
-    }
-
-    private void BuildHueDriftStoryboard()
-    {
-        if (_hueStoryboard is not null)
-        {
-            return;
-        }
-        var hueAnim = new ColorAnimationUsingKeyFrames
-        {
-            Duration = new Duration(TimeSpan.FromSeconds(14)),
-            RepeatBehavior = RepeatBehavior.Forever,
-        };
-        // Constant-R=0x4D so the hue shift stays in the same brightness band
-        // (manual approximation of OKLCH constant-L/C constraint). Alpha=0x80
-        // matches the middle gradient stop's resting opacity.
-        hueAnim.KeyFrames.Add(new LinearColorKeyFrame(
-            WpfColor.FromArgb(0x80, 0x4D, 0xDB, 0xA6), KeyTime.FromPercent(0.0)));
-        hueAnim.KeyFrames.Add(new LinearColorKeyFrame(
-            WpfColor.FromArgb(0x80, 0x4D, 0xCD, 0xC2), KeyTime.FromPercent(0.33)));
-        hueAnim.KeyFrames.Add(new LinearColorKeyFrame(
-            WpfColor.FromArgb(0x80, 0x4D, 0xB8, 0xDB), KeyTime.FromPercent(0.66)));
-        hueAnim.KeyFrames.Add(new LinearColorKeyFrame(
-            WpfColor.FromArgb(0x80, 0x4D, 0xDB, 0xA6), KeyTime.FromPercent(1.0)));
-
-        var sb = new Storyboard();
-        sb.Children.Add(hueAnim);
-        Storyboard.SetTarget(hueAnim, AccentBrush.GradientStops[1]);
-        Storyboard.SetTargetProperty(hueAnim, new PropertyPath(GradientStop.ColorProperty));
-        _hueStoryboard = sb;
     }
 
     // ── Visualizer build ────────────────────────────────────────────────────
@@ -383,10 +336,8 @@ public partial class FloatingPillWindow : Window
                 RadiusX = 1.5,
                 RadiusY = 1.5,
             };
-            // SetResourceReference binds Fill to the theme token, so when
-            // ThemeTokens.Apply replaces the brush in Application.Resources the
-            // bars re-fill in the new theme automatically.
-            bar.SetResourceReference(WpfRectangle.FillProperty, "VisualizerBarActive");
+            // Solid mint in both themes — the capsule is always dark.
+            bar.SetResourceReference(WpfRectangle.FillProperty, "Mint");
             Canvas.SetLeft(bar, i * (BarWidth + BarGap));
             Canvas.SetTop(bar, (TrackHeight - BarMinHeight) / 2);
             VisualizerCanvas.Children.Add(bar);
@@ -402,29 +353,36 @@ public partial class FloatingPillWindow : Window
         }
     }
 
-    private void StartSpinner()
+    /// <summary>
+    /// Returns every bar to its resting pose (minimum height, full opacity) so
+    /// the next Armed/Recording damps up from idle naturally instead of from
+    /// whatever height a cancelled recording left behind.
+    /// </summary>
+    private void ResetBars()
     {
-        // 0.9 s full rotation per §2.4. Direct BeginAnimation on the RotateTransform —
-        // Storyboard.SetTarget on a Freezable inside a deeply named scope silently
-        // no-ops; this is the reliable form.
-        var anim = new DoubleAnimation
+        _shimmerPhase = 0;
+        for (int i = 0; i < BarCount; i++)
         {
-            From = 0,
-            To = 360,
-            Duration = new Duration(TimeSpan.FromMilliseconds(900)),
-            RepeatBehavior = RepeatBehavior.Forever,
-        };
-        SpinnerRotation.BeginAnimation(RotateTransform.AngleProperty, anim);
+            _levels[i] = 0.05;
+            _targets[i] = 0.05;
+            if (_bars[i] is { } bar)
+            {
+                bar.Opacity = 1.0;
+                bar.Height = BarMinHeight;
+                Canvas.SetTop(bar, (TrackHeight - BarMinHeight) / 2);
+            }
+        }
     }
 
-    // ── Visualizer motion model (§4.2) ──────────────────────────────────────
+    // ── Visualizer motion model ─────────────────────────────────────────────
 
     private void OnVisualizerTick(object? sender, EventArgs e)
     {
-        if (_bars[0] is null || _currentVisual is PillVisual.Hidden)
+        if (_bars[0] is null
+            || _currentVisual is PillVisual.Hidden or PillVisual.Idle or PillVisual.Confirmed)
         {
-            // Stay quiescent — bars retain whatever level they had. The next show
-            // will damp from idle back up via the model.
+            // Stay quiescent — bars are hidden in these states (and were reset
+            // on the way in), so there's nothing to animate.
             return;
         }
 
@@ -434,64 +392,76 @@ public partial class FloatingPillWindow : Window
             : Math.Clamp((now - _lastFrameTime).TotalSeconds, 0, 0.064);
         _lastFrameTime = now;
 
-        // Hover-idle: traveling low-amplitude sine wave per Organic Pill §3 idle-
-        // visualizer cue. Per-bar phase offset 0.18 rad, amplitude 0.06-0.14, damp
-        // k≈3.5/s. Doesn't share the voice-envelope target-rolling loop.
-        if (_visualizerMode == VisualizerMode.HoverIdle)
+        switch (_visualizerMode)
         {
-            _hoverIdleWavePhase += dt * (2 * Math.PI / 2.4);
-            for (int i = 0; i < BarCount; i++)
-            {
-                double s = Math.Sin(_hoverIdleWavePhase - (i * 0.18));
-                _targets[i] = 0.10 + (s * 0.04);   // ~0.06 - 0.14
-            }
-        }
-
-        // Re-roll targets every 90–150 ms while recording.
-        if (_isRecording && now >= _nextTargetAt)
-        {
-            _nextTargetAt = now.AddMilliseconds(90 + (_rng.NextDouble() * 60));
-
-            if (_lastRealLevels is not null && _lastRealLevels.Length == BarCount)
-            {
-                // Real audio path — §4.2 trailer: realAmplitude × center_weight × (1 + jitter).
+            case VisualizerMode.Shimmer:
+                // Transcribing: bars collapse to dots; a travelling opacity wave
+                // (period 1.2 s, per-bar phase offset 0.35 rad) says "working".
+                // Reduce-motion → constant 0.7 so nothing pulses.
+                _shimmerPhase += dt * (2 * Math.PI / 1.2);
                 for (int i = 0; i < BarCount; i++)
                 {
-                    double centerWeight = 1.0 - (Math.Abs(i - 9.5) / 9.5);
-                    double jitter = ((_rng.NextDouble() * 2) - 1) * 0.05;
-                    double scaled = _lastRealLevels[i] * (0.6 + (centerWeight * 0.6)) * 4.0;
-                    _targets[i] = Math.Clamp(scaled + jitter, 0.05, 1.0);
+                    _targets[i] = 0.05;
+                    _bars[i].Opacity = _reduceAnimations
+                        ? 0.7
+                        : 0.35 + (0.65 * Math.Max(0, Math.Sin(_shimmerPhase - (i * 0.35))));
                 }
-            }
-            else
-            {
-                // Simulated speak envelope.
-                double speak = 0.55 + (Math.Sin(now.Ticks / 1e7 / 0.38) * 0.25) + ((_rng.NextDouble() - 0.5) * 0.25);
+                break;
+
+            case VisualizerMode.Dots:
+                // Armed: flat dotted line at full opacity, waiting for speech.
                 for (int i = 0; i < BarCount; i++)
                 {
-                    double centerWeight = 1.0 - (Math.Abs(i - 9.5) / 9.5);
-                    double baseVal = 0.18 + (centerWeight * 0.45);
-                    double jitter = ((_rng.NextDouble() * 1.0) - 0.30) * 0.55;
-                    _targets[i] = Math.Clamp((baseVal * speak) + jitter, 0.05, 1.0);
+                    _targets[i] = 0.05;
+                    _bars[i].Opacity = 1.0;
                 }
-            }
-        }
+                break;
 
-        if (!_isRecording && _visualizerMode != VisualizerMode.HoverIdle)
-        {
-            for (int i = 0; i < BarCount; i++)
-            {
-                _targets[i] = 0.05;
-            }
+            case VisualizerMode.Recording:
+                // Re-roll targets every 90–150 ms while recording.
+                if (now >= _nextTargetAt)
+                {
+                    _nextTargetAt = now.AddMilliseconds(90 + (_rng.NextDouble() * 60));
+
+                    if (_lastRealLevels is not null && _lastRealLevels.Length == BarCount)
+                    {
+                        // Real audio path: realAmplitude × center_weight × (1 + jitter).
+                        for (int i = 0; i < BarCount; i++)
+                        {
+                            double centerWeight = 1.0 - (Math.Abs(i - 9.5) / 9.5);
+                            double jitter = ((_rng.NextDouble() * 2) - 1) * 0.05;
+                            double scaled = _lastRealLevels[i] * (0.6 + (centerWeight * 0.6)) * 4.0;
+                            _targets[i] = Math.Clamp(scaled + jitter, 0.05, 1.0);
+                        }
+                    }
+                    else
+                    {
+                        // Simulated speak envelope.
+                        double speak = 0.55 + (Math.Sin(now.Ticks / 1e7 / 0.38) * 0.25) + ((_rng.NextDouble() - 0.5) * 0.25);
+                        for (int i = 0; i < BarCount; i++)
+                        {
+                            double centerWeight = 1.0 - (Math.Abs(i - 9.5) / 9.5);
+                            double baseVal = 0.18 + (centerWeight * 0.45);
+                            double jitter = ((_rng.NextDouble() * 1.0) - 0.30) * 0.55;
+                            _targets[i] = Math.Clamp((baseVal * speak) + jitter, 0.05, 1.0);
+                        }
+                    }
+                }
+                break;
+
+            default:
+                for (int i = 0; i < BarCount; i++)
+                {
+                    _targets[i] = 0.05;
+                }
+                break;
         }
 
         // Damped approach with per-bar rate variation so bars don't move in
-        // lockstep. HoverIdle uses k≈3.5 for the spec's slow approach.
+        // lockstep.
         for (int i = 0; i < BarCount; i++)
         {
-            double rate = _isRecording
-                ? (14 + ((i % 3) * 3))
-                : (_visualizerMode == VisualizerMode.HoverIdle ? 3.5 : 6);
+            double rate = _isRecording ? (14 + ((i % 3) * 3)) : 6;
             double k = 1 - Math.Exp(-rate * dt);
             _levels[i] += (_targets[i] - _levels[i]) * k;
 
@@ -527,12 +497,15 @@ public partial class FloatingPillWindow : Window
             snapshot.State, snapshot.IsHoldMode, snapshot.PostPaste, IsVisible);
 #pragma warning restore CA1848, CA1873
 
-        // Post-paste snapshot — show Confirmed or Error for its hold, then fade out.
+        // Post-paste snapshot — flash Confirmed or hold Error, then back to Idle.
         if (snapshot.PostPaste is { } post)
         {
             if (post.Pasted)
             {
-                ShowConfirmed(post.TargetApp);
+#pragma warning disable CA1848, CA1873
+                _logger.LogDebug("Pasted into {App}.", post.TargetApp);
+#pragma warning restore CA1848, CA1873
+                ShowConfirmed();
             }
             else
             {
@@ -557,6 +530,9 @@ public partial class FloatingPillWindow : Window
 
         switch (snapshot.State)
         {
+            case AppState.Armed:
+                TransitionTo(PillVisual.Armed);
+                break;
             case AppState.Recording:
                 TransitionTo(PillVisual.Recording);
                 break;
@@ -564,8 +540,8 @@ public partial class FloatingPillWindow : Window
                 TransitionTo(PillVisual.Transcribing);
                 break;
             default:
-                // Idle / Armed / Cancelled — fall back to the Idle visual (dev override
-                // of spec §6.1), unless a post-paste hold is currently running.
+                // Idle / Cancelled — back to the handle, unless a post-paste
+                // hold is currently running.
                 if (_postPasteTimer is null)
                 {
                     TransitionTo(PillVisual.Idle);
@@ -588,8 +564,36 @@ public partial class FloatingPillWindow : Window
         var previous = _currentVisual;
         _currentVisual = next;
 
-        // Update recording flag — drives the visualizer motion model.
+        // Recording flag + visualizer mode drive the motion model.
         _isRecording = next == PillVisual.Recording;
+        _visualizerMode = next switch
+        {
+            PillVisual.Armed => VisualizerMode.Dots,
+            PillVisual.Recording => VisualizerMode.Recording,
+            PillVisual.Transcribing => VisualizerMode.Shimmer,
+            _ => VisualizerMode.Off,
+        };
+        if (previous == PillVisual.Transcribing)
+        {
+            // Leaving the shimmer — restore full opacity on every bar.
+            for (int i = 0; i < BarCount; i++)
+            {
+                if (_bars[i] is { } bar)
+                {
+                    bar.Opacity = 1.0;
+                }
+            }
+        }
+        if (next is PillVisual.Idle or PillVisual.Hidden)
+        {
+            ResetBars();
+        }
+        if (previous == PillVisual.Confirmed)
+        {
+            // Drop the mint flash (covers the static reduce-motion hold too).
+            FlashOverlay.BeginAnimation(OpacityProperty, null);
+            FlashOverlay.Opacity = 0;
+        }
 
         // Dock's record glyph reflects FSM state: dot when not recording,
         // filled red square when actively recording (so the toggle's affordance
@@ -598,36 +602,13 @@ public partial class FloatingPillWindow : Window
         // NOTE: do NOT auto-dismiss RecordNudgePopup on Recording transition.
         // ToggleFromTray dispatches the recording snapshot within a few ms of
         // the click, so a dismiss-on-Recording rule killed the nudge before
-        // the user could read it. The 10 s timer in ShowRecordNudge is the
+        // the user could read it. The 2 s timer in ShowRecordNudge is the
         // only dismissal path now.
 
-        // Accent line + glow per §3.4 opacity table. Idle and Hidden both render
-        // the accent line invisible.
-        AccentLine.Opacity = next switch
-        {
-            PillVisual.Recording => 1.0,
-            PillVisual.Transcribing => 0.55,
-            PillVisual.Confirmed => 0.40,
-            PillVisual.Error => 1.0,
-            _ => 0.0,
-        };
-        AccentGlow.Opacity = next is PillVisual.Recording or PillVisual.Error ? 0.6 : 0.0;
+        UpdateContentVisibility();
+        ApplyGeometry(animated: true);
 
-        // §2.6 error accent shift is instant — swap brush colors.
-        if (next == PillVisual.Error)
-        {
-            SetAccent(0xFF, 0x4D, 0x4F);
-        }
-        else if (previous == PillVisual.Error)
-        {
-            SetAccent(0x4D, 0xDB, 0xA6);
-        }
-
-        // Content crossfade — fade out the old, fade in the new.
-        FadeContent(previous, fadeIn: false);
-        FadeContent(next, fadeIn: true);
-
-        // Pill-level appear/disappear (§5).
+        // Pill-level appear/disappear.
         if (next == PillVisual.Hidden && previous != PillVisual.Hidden)
         {
             FadePillOut();
@@ -638,95 +619,38 @@ public partial class FloatingPillWindow : Window
         }
     }
 
-    private void SetAccent(byte r, byte g, byte b)
+    /// <summary>
+    /// Crossfades the capsule's centre content to match the visual state and the
+    /// dock: bars for Armed/Recording/Transcribing, the error row for Error, and
+    /// the hotkey hint while the dock is open and nothing else needs the centre.
+    /// </summary>
+    private void UpdateContentVisibility()
     {
-        // Three stops in AccentBrush — fade ends to transparent, center to 50% accent.
-        var transparent = WpfColor.FromArgb(0x00, r, g, b);
-        var middle = WpfColor.FromArgb(0x80, r, g, b);
-        AccentBrush.GradientStops[0].Color = transparent;
-        AccentBrush.GradientStops[1].Color = middle;
-        AccentBrush.GradientStops[2].Color = transparent;
-        AccentGlow.Color = WpfColor.FromRgb(r, g, b);
+        bool dock = _dockOpen || _isPinned;
+        bool bars = _currentVisual is PillVisual.Armed or PillVisual.Recording or PillVisual.Transcribing;
+        bool error = _currentVisual == PillVisual.Error;
+        SetShown(VisualizerCanvas, bars);
+        SetShown(ErrorContent, error);
+        SetShown(HintLabel, dock && !bars && !error);
     }
 
-    private void FadeContent(PillVisual which, bool fadeIn)
+    private void SetShown(FrameworkElement target, bool shown)
     {
-        FrameworkElement? target = which switch
-        {
-            // Idle: which child shows depends on hover state (Phase 2). The
-            // ApplyIdleContent helper handles the per-hover swap; here we just
-            // delegate when this is an Idle-entry/exit event.
-            PillVisual.Idle => null,
-            PillVisual.Recording => VisualizerContent,
-            PillVisual.Transcribing => TranscribingContent,
-            PillVisual.Confirmed => ConfirmedContent,
-            PillVisual.Error => ErrorContent,
-            _ => null,
-        };
-        if (which == PillVisual.Idle)
-        {
-            if (fadeIn)
-            {
-                // Re-evaluate idle content based on current hover state.
-                ApplyIdleContent();
-            }
-            else
-            {
-                // Fade out whichever idle child happens to be visible.
-                FadeElement(IdleContent, fadeIn: false);
-                FadeElement(VisualizerContent, fadeIn: false);
-            }
-            return;
-        }
-        if (target is null)
+        if (_shown.TryGetValue(target, out var current) && current == shown)
         {
             return;
         }
-
-        // Entering a non-Idle, non-hover-idle state — make sure the visualizer
-        // mode reflects the new state.
-        if (fadeIn)
-        {
-            _visualizerMode = which == PillVisual.Recording ? VisualizerMode.Recording : VisualizerMode.Off;
-            if (which == PillVisual.Recording)
-            {
-                VisualizerLabel.Text = "RECORDING";
-            }
-        }
-        FadeElement(target, fadeIn);
-    }
-
-    // Phase 2: shows IdleContent (SVG + KusPus) when not hovered, swaps to the
-    // VisualizerContent (bars + IDLE · HOLD TO DICTATE label) on hover. Called
-    // from TransitionTo when entering Idle, and from OnPillMouseEnter/Leave
-    // while in Idle state.
-    private void ApplyIdleContent()
-    {
-        if (_currentVisual != PillVisual.Idle)
-        {
-            return;
-        }
-        if (IsMouseOver)
-        {
-            VisualizerLabel.Text = "IDLE · HOLD TO DICTATE";
-            _visualizerMode = VisualizerMode.HoverIdle;
-            FadeElement(IdleContent, fadeIn: false);
-            FadeElement(VisualizerContent, fadeIn: true);
-        }
-        else
-        {
-            _visualizerMode = VisualizerMode.Off;
-            FadeElement(VisualizerContent, fadeIn: false);
-            FadeElement(IdleContent, fadeIn: true);
-        }
+        _shown[target] = shown;
+        FadeElement(target, fadeIn: shown);
     }
 
     private static void FadeElement(FrameworkElement target, bool fadeIn)
     {
         target.IsHitTestVisible = fadeIn;
+        // No From — animate from the current (possibly mid-animation) opacity
+        // so a direction flip mid-crossfade doesn't jump.
         var anim = new DoubleAnimation
         {
-            From = fadeIn ? 0 : target.Opacity,
             To = fadeIn ? 1 : 0,
             Duration = ContentCrossfade,
             EasingFunction = new CubicEase { EasingMode = fadeIn ? EasingMode.EaseOut : EasingMode.EaseIn },
@@ -762,30 +686,163 @@ public partial class FloatingPillWindow : Window
             if (_currentVisual == PillVisual.Hidden)
             {
                 Hide();
-                // Reset levels so the next show damps up from idle naturally.
-                for (int i = 0; i < BarCount; i++)
-                {
-                    _levels[i] = 0.05;
-                    _targets[i] = 0.05;
-                }
+                ResetBars();
             }
         };
         BeginAnimation(OpacityProperty, anim);
     }
 
-    // ── Post-paste states (§2.5, §2.6, §5.1) ────────────────────────────────
+    // ── Capsule geometry ────────────────────────────────────────────────────
 
-    private void ShowConfirmed(string appName)
+    /// <summary>
+    /// Single source of truth for the capsule's target size and the dock reveal,
+    /// derived from the visual state and the dock/pin flags. Animates the three
+    /// DPs (expand 180 ms ease-out, collapse 120 ms ease-in; instant under
+    /// reduce-animations) and the corner buttons.
+    /// </summary>
+    private void ApplyGeometry(bool animated)
     {
-        ConfirmedAppRun.Text = appName;
+        bool dock = _dockOpen || _isPinned;
+        bool handleState = _currentVisual is PillVisual.Idle or PillVisual.Confirmed or PillVisual.Hidden;
+
+        double h = handleState ? (dock ? ChipH : HandleH) : ChipH;
+        double w = dock
+            ? HoverW
+            : _currentVisual switch
+            {
+                PillVisual.Armed or PillVisual.Recording or PillVisual.Transcribing => RecordW,
+                PillVisual.Error => Math.Max(RecordW, MeasureErrorWidth() + 40),
+                _ => HandleW,
+            };
+        double reveal = dock ? DockH : 0;
+
+        bool expanding = w > CapsuleWidth || h > CapsuleHeight || reveal > DockReveal;
+        int ms = !animated ? 0 : (expanding ? ExpandMs : CollapseMs);
+        var mode = expanding ? EasingMode.EaseOut : EasingMode.EaseIn;
+
+        AnimateDp(CapsuleWidthProperty, w, ms, mode);
+        AnimateDp(CapsuleHeightProperty, h, ms, mode);
+        AnimateDp(DockRevealProperty, reveal, ms, mode);
+        UpdateCapsuleCorners();
+        AnimateCornerButtons(dock);
+    }
+
+    private void AnimateDp(DependencyProperty dp, double to, int ms, EasingMode mode)
+    {
+        if (_reduceAnimations || ms <= 0)
+        {
+            // Clear any running clock first — a held animation would otherwise
+            // mask the local value we're about to set.
+            BeginAnimation(dp, null);
+            SetValue(dp, to);
+            return;
+        }
+        // No From — animates from the current (possibly mid-flight) value so
+        // a hover-in/out flip never jumps.
+        var anim = new DoubleAnimation
+        {
+            To = to,
+            Duration = new Duration(TimeSpan.FromMilliseconds(ms)),
+            EasingFunction = new CubicEase { EasingMode = mode },
+        };
+        BeginAnimation(dp, anim);
+    }
+
+    private void ApplyCapsuleWidth(double v)
+    {
+        if (PillSurface is null)
+        {
+            return;
+        }
+        PillSurface.Width = v;
+        UpdateHoverPad();
+    }
+
+    private void ApplyCapsuleHeight(double v)
+    {
+        if (PillSurface is null)
+        {
+            return;
+        }
+        PillSurface.Height = v;
+        UpdateCapsuleCorners();
+        UpdateHoverPad();
+    }
+
+    private void ApplyDockReveal(double v)
+    {
+        if (PillSurface is null)
+        {
+            return;
+        }
+        PillSurface.Margin = new Thickness(0, 0, 0, v);
+        DockDrawer.Opacity = v / DockH;
+        DockTransform.Y = DockH - v;
+        UpdateHoverPad();
+    }
+
+    /// <summary>
+    /// r = min(18, h/2) so an 8-tall handle gets 4 px corners (never 18 on an
+    /// 8-tall Border); bottom corners square off while the dock is open so chip
+    /// and dock read as one continuous shape. Mirrored onto the flash overlay.
+    /// </summary>
+    private void UpdateCapsuleCorners()
+    {
+        double r = Math.Min(18, CapsuleHeight / 2);
+        bool dock = _dockOpen || _isPinned;
+        double rb = dock ? 0 : r;
+        var corners = new CornerRadius(r, r, rb, rb);
+        PillSurface.CornerRadius = corners;
+        FlashOverlay.CornerRadius = corners;
+    }
+
+    private void UpdateHoverPad()
+    {
+        HoverPad.Width = Math.Min(HoverW, CapsuleWidth + HoverPadSlackW);
+        HoverPad.Height = Math.Min(ChipH + DockH, CapsuleHeight + DockReveal + HoverPadSlackH);
+    }
+
+    private double MeasureErrorWidth()
+    {
+        ErrorContent.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
+        return ErrorContent.DesiredSize.Width;
+    }
+
+    // ── Post-paste states ───────────────────────────────────────────────────
+
+    private void ShowConfirmed()
+    {
+        // Collapse to the handle immediately; the mint flash is the only
+        // confirmation cue (no "Pasted into …" text).
         TransitionTo(PillVisual.Confirmed);
-        StartPostPasteHold(TimeSpan.FromMilliseconds(1000));
+        FlashOverlay.BeginAnimation(OpacityProperty, null);
+        if (_reduceAnimations)
+        {
+            // Static hold — cleared when the post-paste timer returns to Idle.
+            FlashOverlay.Opacity = 0.7;
+        }
+        else
+        {
+            FlashOverlay.Opacity = 0.9;
+            FlashOverlay.BeginAnimation(OpacityProperty, new DoubleAnimation
+            {
+                From = 0.9,
+                To = 0,
+                Duration = new Duration(TimeSpan.FromMilliseconds(FlashMs)),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+            });
+        }
+        StartPostPasteHold(TimeSpan.FromMilliseconds(FlashMs));
     }
 
     private void ShowError(string reason)
     {
+        // Text first so MeasureErrorWidth (via ApplyGeometry) sees the reason.
         ErrorText.Text = reason;
         TransitionTo(PillVisual.Error);
+        // Re-fit the capsule when a second error lands while already in Error
+        // (TransitionTo is a no-op in that case).
+        ApplyGeometry(animated: true);
         StartPostPasteHold(TimeSpan.FromMilliseconds(2000));
     }
 
@@ -797,13 +854,26 @@ public partial class FloatingPillWindow : Window
         {
             _postPasteTimer?.Stop();
             _postPasteTimer = null;
-            // PRD G4 dev override — return to Idle (visible), not Hidden.
             TransitionTo(PillVisual.Idle);
         };
         _postPasteTimer.Start();
     }
 
-    // ── Positioning (§1.2, §6.5 + multi-monitor sticky from CLAUDE.md) ──────
+    // ── Positioning (multi-monitor sticky from CLAUDE.md) ───────────────────
+    //
+    // The window is a fixed 352×84; everything positional works on the ANCHOR
+    // = bottom-centre of the idle handle, which sits PadBottom above the
+    // window's bottom edge. Default anchor = (work-area centre X, work-area
+    // bottom − EdgeGap), which puts the window's bottom edge exactly on the
+    // work-area bottom (never onto the taskbar).
+
+    private WpfPoint GetAnchor() => new(Left + (Width / 2), Top + Height - PadBottom);
+
+    private void SetAnchor(double x, double y)
+    {
+        Left = x - (Width / 2);
+        Top = y - Height + PadBottom;
+    }
 
     private void ShowAtForegroundMonitor()
     {
@@ -821,17 +891,18 @@ public partial class FloatingPillWindow : Window
             // Final fallback — no monitor handle. Use cursor's screen via WinForms.
             var cur = System.Windows.Forms.Cursor.Position;
             var s = Screen.FromPoint(cur);
-            Left = s.WorkingArea.Left + ((s.WorkingArea.Width - 200.0) / 2);
-            Top = s.WorkingArea.Bottom - Height - 40;
+            SetAnchor(
+                s.WorkingArea.Left + (s.WorkingArea.Width / 2.0),
+                s.WorkingArea.Bottom - EdgeGap);
         }
 
         Show();
     }
 
     /// <summary>
-    /// Positions the pill on the given monitor — at the user's remembered position
-    /// for that monitor if one exists this session, otherwise at the §1.2 default
-    /// (bottom-center of the work area, 40 DIP above the bottom edge). Does not
+    /// Positions the bar on the given monitor — at the user's remembered anchor
+    /// for that monitor if one exists this session, otherwise at the default
+    /// (bottom-centre of the work area, EdgeGap above the bottom edge). Does not
     /// call Show — the caller decides visibility lifecycle.
     /// </summary>
     private void PlaceOnMonitor(IntPtr hMon)
@@ -845,15 +916,13 @@ public partial class FloatingPillWindow : Window
         if (_monitorPositions.TryGetValue(miEx.szDevice, out var remembered))
         {
 #pragma warning disable CA1848, CA1873
-            _logger.LogDebug("Pill placing on {Device} at remembered ({L:F0},{T:F0}).",
+            _logger.LogDebug("Pill placing on {Device} at remembered anchor ({X:F0},{Y:F0}).",
                 miEx.szDevice, remembered.X, remembered.Y);
 #pragma warning restore CA1848, CA1873
-            Left = remembered.X;
-            Top = remembered.Y;
+            SetAnchor(remembered.X, remembered.Y);
             return;
         }
 
-        // Default per design spec §1.2.
         double scale = 1.0;
         if (GetDpiForMonitor(hMon, MonitorDpiType.EffectiveDpi, out uint dpiX, out _) == 0
             && dpiX > 0)
@@ -865,9 +934,7 @@ public partial class FloatingPillWindow : Window
         double workWidthDip = (miEx.rcWork.Right - miEx.rcWork.Left) / scale;
         double workBottomDip = miEx.rcWork.Bottom / scale;
 
-        // Anchor on base width (200) not animated width, so hover-extend doesn't drift center.
-        Left = workLeftDip + ((workWidthDip - 200.0) / 2);
-        Top = workBottomDip - Height - 40;
+        SetAnchor(workLeftDip + (workWidthDip / 2), workBottomDip - EdgeGap);
 
 #pragma warning disable CA1848, CA1873
         _logger.LogDebug("Pill placing on {Device} at default ({L:F0},{T:F0}) (scale {Scale}).",
@@ -910,7 +977,7 @@ public partial class FloatingPillWindow : Window
         PlaceOnMonitor(fgMon);
     }
 
-    // ── Drag (custom, beyond design spec §1.2 click-through override) ───────
+    // ── Drag ────────────────────────────────────────────────────────────────
 
     private void OnPillMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
@@ -918,16 +985,14 @@ public partial class FloatingPillWindow : Window
         {
             return;
         }
-        // Skip when the user is clicking on a Settings / Close button — let the
+        // Skip when the user is clicking on a Pin / Record button — let the
         // button's Click handler do its thing.
         if (IsClickOnButton(e.OriginalSource as DependencyObject))
         {
             return;
         }
-        // Pin = positional lock per UX audit: when pinned, the pill cannot be
-        // dragged. User must unpin to move it again. The pin glyph itself is
-        // the affordance — the change in interaction matches the visual change
-        // (mint-tinted glyph + always-visible).
+        // Pin = positional lock: when pinned, the bar cannot be dragged. User
+        // must unpin to move it again.
         if (_isPinned)
         {
             return;
@@ -936,6 +1001,7 @@ public partial class FloatingPillWindow : Window
         _isDragging = true;
         try
         {
+            // DragMove moves the fixed window; the anchor is re-derived below.
             DragMove();
         }
         finally
@@ -943,14 +1009,15 @@ public partial class FloatingPillWindow : Window
             _isDragging = false;
         }
 
-        // Capture the new position under whatever monitor we landed on.
+        // Capture the new anchor under whatever monitor we landed on.
         var device = GetCurrentMonitorDeviceName();
         if (device is not null)
         {
-            _monitorPositions[device] = new WpfPoint(Left, Top);
+            var anchor = GetAnchor();
+            _monitorPositions[device] = anchor;
 #pragma warning disable CA1848, CA1873
-            _logger.LogDebug("Pill drag end → remembered ({L:F0},{T:F0}) on {Device}.",
-                Left, Top, device);
+            _logger.LogDebug("Pill drag end → remembered anchor ({X:F0},{Y:F0}) on {Device}.",
+                anchor.X, anchor.Y, device);
 #pragma warning restore CA1848, CA1873
         }
     }
@@ -984,34 +1051,27 @@ public partial class FloatingPillWindow : Window
         return GetMonitorInfoExW(hMon, ref miEx) ? miEx.szDevice : null;
     }
 
-    // ── Hover-expand + dock drawer (PILL_DESIGN Phase 1 redesign) ─────────
+    // ── Hover-expand + dock drawer ──────────────────────────────────────────
     //
-    // On pointer enter (or while pinned): pill widens 200→320, window grows
-    // 56→78 tall to accommodate the 22 px dock peek, dock slides down + fades
-    // in, Pin + Magic-wand corner buttons fade in (Pin de-rotates -12°→0°).
+    // On pointer enter (or while pinned): capsule grows to 320×36, the dock
+    // slides out below it, Pin + Magic-wand corner buttons fade in (Pin
+    // de-rotates -12°→0°) and the hotkey hint shows.
     //
-    // On pointer leave: reverses — but stays open if pinned.
+    // On pointer leave: reverses — but stays open if pinned or while the mic
+    // picker popup is open.
     //
-    // Pin click latches "always open" — dock + corner buttons stay visible
-    // after the cursor leaves until the user clicks Pin again.
-
-    private static readonly Duration DockSlideIn = new(TimeSpan.FromMilliseconds(240));
-    private static readonly Duration DockSlideOut = new(TimeSpan.FromMilliseconds(160));
-    private static readonly Duration PinFade = new(TimeSpan.FromMilliseconds(180));
-    private static readonly Duration PinRotate = new(TimeSpan.FromMilliseconds(220));
+    // Pin click latches "always open" — chip + dock + corner buttons stay
+    // visible after the cursor leaves until the user clicks Pin again.
 
     private bool _isPinned;
+    private bool _dockOpen;
     // True while the mic-chooser popup is open. Treated as "pinned for hover"
     // so the dock doesn't auto-close mid-pick (cursor enters the popup → pill
     // MouseLeave would otherwise fire and slam the dock shut).
     private bool _pickerOpen;
     private IPrefsStoreBridge? _prefsBridge;
     private IAudioRecorderBridge? _audioBridge;
-    // Phase 3 — personality animations.
-    private Storyboard? _breathStoryboard;
-    private Storyboard? _hueStoryboard;
     private bool _reduceAnimations;
-    private bool _personalityRunning;
 
     // Composition root injects these tiny bridges so the pill can read the
     // current device list + active selection without taking a hard dependency
@@ -1061,144 +1121,64 @@ public partial class FloatingPillWindow : Window
 
     /// <summary>
     /// Composition root calls this with (userToggle OR Windows reduced-motion).
-    /// True → personality animations (breath, hue drift) pause. State-transition
-    /// animations and the dock slide remain active.
+    /// True → capsule resizes snap instead of tweening and the transcribing
+    /// shimmer holds a static opacity. Content crossfades stay.
     /// </summary>
     public void SetReduceAnimations(bool reduce)
     {
         _reduceAnimations = reduce;
-        if (reduce)
-        {
-            StopPersonalityAnimations();
-        }
-        else
-        {
-            StartPersonalityAnimations();
-        }
     }
 
     private void OnPillMouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
     {
-        // Pin = compact-mode toggle (user spec): while pinned, hover MUST NOT
-        // re-expand the window or re-show the dock — only the idle content
-        // swaps SVG+wordmark → visualizer+IDLE label.
-        if (!_isPinned)
-        {
-            OpenDock();
-        }
-        ApplyIdleContent();
+        OpenDock();
     }
 
     private void OnPillMouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
     {
         // Don't close while the user has the mic chooser open — moving the
         // cursor over the popup fires the pill's MouseLeave (documented WPF
-        // behaviour). Popup's Closed handler re-evaluates on close.
-        if (_pickerOpen)
-        {
-            return;
-        }
-        // Pinned mode: don't contract (we're already contracted) — only flip
-        // content back to SVG+wordmark.
-        if (!_isPinned)
+        // behaviour). Popup's Closed handler re-evaluates on close. Pinned
+        // keeps the chip + dock open too.
+        if (!_pickerOpen && !_isPinned)
         {
             CloseDock();
         }
-        ApplyIdleContent();
     }
-
-    private const double PillCollapsedWidth = 200;
-    private const double PillExpandedWidth = 320;
-    private const double WindowCollapsedHeight = 56;
-    private const double WindowExpandedHeight = 78;
 
     private void OpenDock()
     {
-        // Snap pill's bottom corners to square so the pill+dock seam reads as
-        // one continuous shape. Top corners stay 8 px rounded (Radius.Lg).
-        // Snap (not animate) since CornerRadius isn't a natively animatable
-        // WPF DependencyProperty without a custom animation; the snap happens
-        // BEFORE the dock slide-in so the bottom edge is flat the whole time
-        // the dock is becoming visible. Per pill UI request 2026-05-17.
-        // OnPillMouseEnter / OnPinClick are the only callers; both already
-        // gate on !_isPinned so pinned-mode CornerRadius is never touched.
-        PillSurface.CornerRadius = new CornerRadius(8, 8, 0, 0);
-        AnimateWindowSize(width: PillExpandedWidth, height: WindowExpandedHeight, dockShowing: true);
-        AnimateDockDrawer(visible: true);
-        AnimateCornerButtons(visible: true);
+        if (_dockOpen)
+        {
+            return;
+        }
+        _dockOpen = true;
+        RefreshDock();
     }
 
     private void CloseDock()
     {
-        // Restore pill's full 8 px rounded corners. Snap at start of CloseDock —
-        // the brief overlap between the round bottom and the still-visible
-        // dock is during a fade/slide-out animation, so the artifact is
-        // visually subordinate to the "going away" cue.
-        PillSurface.CornerRadius = new CornerRadius(8);
-        AnimateWindowSize(width: PillCollapsedWidth, height: WindowCollapsedHeight, dockShowing: false);
-        AnimateDockDrawer(visible: false);
-        AnimateCornerButtons(visible: false);
-    }
-
-    private void AnimateWindowSize(double width, double height, bool dockShowing)
-    {
-        // Fixes per the WPF window-animation research:
-        // 1. Center-expand: when Width grows by ΔW, Left must shrink by ΔW/2 so
-        //    the pill expands symmetrically (default WPF animates Width only —
-        //    right edge moves while left stays put). User audit feedback.
-        // 2. Height-stuck bug: animating Window.Height with WindowStyle="None"
-        //    is documented as "part WPF / part native" (see Microsoft Learn
-        //    forum thread + Pixel-in-Gene blog). The animated value can fail
-        //    to sync back to the OS window. Fix: FillBehavior=Stop on the
-        //    Width/Height animations + a Completed handler that explicitly
-        //    clears the animation clock and assigns the final value.
-        var ease = new CubicEase { EasingMode = dockShowing ? EasingMode.EaseOut : EasingMode.EaseIn };
-        var dur = dockShowing ? DockSlideIn : DockSlideOut;
-
-        double deltaW = width - Width;
-        double targetLeft = Left - (deltaW / 2.0);
-
-        AnimateWindowProperty(WidthProperty, width, dur, ease);
-        AnimateWindowProperty(HeightProperty, height, dur, ease);
-        AnimateWindowProperty(LeftProperty, targetLeft, dur, ease);
-    }
-
-    private void AnimateWindowProperty(DependencyProperty prop, double to, Duration dur, IEasingFunction ease)
-    {
-        var anim = new DoubleAnimation
+        if (!_dockOpen)
         {
-            To = to,
-            Duration = dur,
-            EasingFunction = ease,
-            FillBehavior = FillBehavior.Stop,
-        };
-        anim.Completed += (_, _) =>
-        {
-            // Clear the animation clock so the property's local value takes
-            // effect, then assign the target value. Without this the OS-side
-            // window stays at the animated value (WPF/native split bug).
-            BeginAnimation(prop, null);
-            SetValue(prop, to);
-        };
-        BeginAnimation(prop, anim);
+            return;
+        }
+        _dockOpen = false;
+        RefreshDock();
     }
 
-    private void AnimateDockDrawer(bool visible)
+    private void RefreshDock()
     {
-        DockDrawer.IsHitTestVisible = visible;
-        var ease = new CubicEase { EasingMode = visible ? EasingMode.EaseOut : EasingMode.EaseIn };
-        var dur = visible ? DockSlideIn : DockSlideOut;
-        DockDrawer.BeginAnimation(OpacityProperty,
-            new DoubleAnimation { To = visible ? 1.0 : 0.0, Duration = dur, EasingFunction = ease });
-        DockTransform.BeginAnimation(TranslateTransform.YProperty,
-            new DoubleAnimation { To = visible ? 0.0 : -22.0, Duration = dur, EasingFunction = ease });
+        bool dock = _dockOpen || _isPinned;
+        DockDrawer.IsHitTestVisible = dock;
+        UpdateContentVisibility();
+        ApplyGeometry(animated: true);
     }
 
     private void AnimateCornerButtons(bool visible)
     {
-        // While pinned (compact mode), the pin button stays visible always so
-        // the user can click it again to unpin. The buttons share a StackPanel,
-        // so the magic-wand rides along — harmless (it's dormant anyway).
+        // While pinned, the pin button stays visible always so the user can
+        // click it again to unpin. The buttons share a StackPanel, so the
+        // magic-wand rides along — harmless (it's dormant anyway).
         bool effectiveVisible = visible || _isPinned;
         CornerButtons.IsHitTestVisible = effectiveVisible;
         var ease = new CubicEase { EasingMode = effectiveVisible ? EasingMode.EaseOut : EasingMode.EaseIn };
@@ -1221,9 +1201,9 @@ public partial class FloatingPillWindow : Window
 #pragma warning restore CA1848, CA1873
         // Mint tint glyph when pinned.
         PinGlyph.SetResourceReference(TextBlock.ForegroundProperty,
-            _isPinned ? "Mint" : "SecondaryText");
-        // Compact record button visibility follows pin state so the user can
-        // still trigger recording without unpinning (per UX audit issue #2).
+            _isPinned ? "Mint" : "PillIcon");
+        // Compact record button visibility follows pin state so a persistent
+        // record affordance sits in the top-left corner opposite the pin.
         CompactRecordButton.Visibility = _isPinned
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -1232,34 +1212,34 @@ public partial class FloatingPillWindow : Window
         PillSurface.Cursor = _isPinned
             ? System.Windows.Input.Cursors.Arrow
             : System.Windows.Input.Cursors.SizeAll;
+
+        // Pinned keeps the chip expanded with the dock open. Unpinning while
+        // the cursor has already left collapses; unpinning while still hovered
+        // leaves the normal hover-open state in place.
         if (_isPinned)
         {
-            // Compact mode (user spec): contract pill + slide dock back, even
-            // though the cursor is still over the pill from clicking pin. The
-            // pin button stays visible (AnimateCornerButtons → effectiveVisible
-            // includes _isPinned). Content stays as visualizer for as long as
-            // the cursor remains; OnPillMouseLeave will swap it to SVG.
+            RefreshDock();
+        }
+        else if (!IsMouseOver)
+        {
             CloseDock();
         }
-        else if (IsMouseOver)
+        else
         {
-            // Just unpinned and still hovered → resume the normal hover-expand.
-            OpenDock();
+            RefreshDock();
         }
-        // else (unpinned + not hovered) → leave the pill in its contracted
-        // resting state; next hover will OpenDock normally.
     }
 
     private void UpdateRecordGlyph(PillVisual state)
     {
         // Both record glyphs (dock + compact corner) follow the same state
-        // pattern: grey dot when idle (tap to start), red rounded-square when
-        // recording (tap to stop). Per user dogfood feedback 2026-05-17.
+        // pattern: muted dot when idle (tap to start), red rounded-square when
+        // recording (tap to stop).
         bool recording = state == PillVisual.Recording;
         var brush = recording
             ? (System.Windows.Media.Brush)new System.Windows.Media.SolidColorBrush(
                 System.Windows.Media.Color.FromRgb(0xEF, 0x53, 0x50))
-            : (System.Windows.Media.Brush)System.Windows.Application.Current.FindResource("MutedText");
+            : (System.Windows.Media.Brush)System.Windows.Application.Current.FindResource("PillTextMuted");
 
         // Dock record glyph (8×8): full-circle dot ↔ rounded square.
         double rDock = recording ? 1.5 : 4;
@@ -1352,7 +1332,6 @@ public partial class FloatingPillWindow : Window
         if (!IsMouseOver && !_isPinned)
         {
             CloseDock();
-            ApplyIdleContent();
         }
     }
 

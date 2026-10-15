@@ -7,7 +7,10 @@ using System.Windows;
 using System.Windows.Threading;
 using WpfApplication = System.Windows.Application;
 using KusPus.Audio;
+using KusPus.Core.Platform;
+using KusPus.Coordination;
 using KusPus.Native;
+using KusPus.Parakeet;
 using KusPus.Persistence;
 using KusPus.Whisper;
 using Microsoft.Extensions.DependencyInjection;
@@ -110,7 +113,7 @@ public partial class App : System.Windows.Application
             _services.GetRequiredService<IHistoryStore>(),
             _coordinator,
             _services.GetRequiredService<IAudioRecorder>(),
-            _services.GetRequiredService<IWhisperRunner>(),
+            _services.GetRequiredService<ITranscriber>(),
             _services.GetService<ILogger<MainWindow>>());
 
         // Pill's hover-extended Settings button opens Preferences too (audit follow-
@@ -139,10 +142,17 @@ public partial class App : System.Windows.Application
             prefs: new PrefsStoreBridge(prefsStore),
             audio: new AudioDeviceBridge());
 
-        // Personality animations gate: user opt-out OR Windows accessibility
-        // "Show animations" setting off. Recomputed on every settings change.
+        // Reduce-animations gate: user opt-out OR Windows accessibility "Show
+        // animations" setting off. The hover hint ("Hold ^ ⊞ to dictate")
+        // rides the same subscription so a hotkey edit updates the pill live.
+        // Both recomputed on every settings change.
         UpdatePillReduceAnimations(prefsStore.Current);
-        prefsStore.Changes.Subscribe(s => Dispatcher.BeginInvoke(() => UpdatePillReduceAnimations(s)));
+        UpdatePillHotkeyHint(prefsStore.Current);
+        prefsStore.Changes.Subscribe(s => Dispatcher.BeginInvoke(() =>
+        {
+            UpdatePillReduceAnimations(s);
+            UpdatePillHotkeyHint(s);
+        }));
 
         _tray = new TrayManager(
             prefsStore,
@@ -170,7 +180,7 @@ public partial class App : System.Windows.Application
                     _services.GetRequiredService<IPrefsStore>(),
                     _services.GetRequiredService<IHotkeyEngine>(),
                     _services.GetRequiredService<IAudioRecorder>(),
-                    _services.GetRequiredService<IWhisperRunner>(),
+                    _services.GetRequiredService<ITranscriber>(),
                     _services.GetRequiredService<IModelManager>(),
                     _services.GetService<ILogger<OnboardingWindow>>());
                 window.ShowDialog();
@@ -222,7 +232,7 @@ public partial class App : System.Windows.Application
                 sp.GetRequiredService<IPrefsStore>(),
                 sp.GetService<ILogger<EgressAllowlistHandler>>())
             {
-                InnerHandler = new SocketsHttpHandler(),
+                InnerHandler = EgressAllowlistHandler.CreateInnerHandler(),
             };
             return new HttpClient(handler);
         });
@@ -235,12 +245,17 @@ public partial class App : System.Windows.Application
                 logger: sp.GetService<ILogger<ModelManager>>()));
         services.AddSingleton<IProcessContainer>(sp =>
             new JobObjectContainer(sp.GetService<ILogger<JobObjectContainer>>()));
-        services.AddSingleton<IWhisperRunner>(sp =>
+        // Two engines behind one ITranscriber: whisper.exe subprocess for ggml models,
+        // in-process sherpa-onnx for Parakeet. The router picks by ModelDescriptor.Engine.
+        services.AddSingleton(sp =>
             new WhisperRunner(
                 AppPaths.WhisperDir,
                 AppPaths.ExpectedWhisperSha256,
                 onProcessStarted: sp.GetRequiredService<IProcessContainer>().Contain,
                 logger: sp.GetService<ILogger<WhisperRunner>>()));
+        services.AddSingleton(sp => new ParakeetTranscriber(logger: sp.GetService<ILogger<ParakeetTranscriber>>()));
+        services.AddSingleton<ITranscriber>(sp =>
+            new EngineRouter(sp.GetRequiredService<WhisperRunner>(), sp.GetRequiredService<ParakeetTranscriber>()));
 
         // Audio — tempDir from KUSPUS_TEMP_DIR or system %TEMP%.
         services.AddSingleton<IAudioRecorder>(sp =>
@@ -266,12 +281,13 @@ public partial class App : System.Windows.Application
         services.AddSingleton(sp => new AppCoordinator(
             sp.GetRequiredService<IHotkeyEngine>(),
             sp.GetRequiredService<IAudioRecorder>(),
-            sp.GetRequiredService<IWhisperRunner>(),
+            sp.GetRequiredService<ITranscriber>(),
             sp.GetRequiredService<IPasteEngine>(),
             sp.GetRequiredService<IHistoryStore>(),
             sp.GetRequiredService<IModelManager>(),
             sp.GetRequiredService<IPrefsStore>(),
-            WpfApplication.Current.Dispatcher,
+            new WpfUiDispatcher(WpfApplication.Current.Dispatcher),
+            AppPaths.FailedDir,
             sp.GetService<ILogger<AppCoordinator>>()));
     }
 
@@ -282,6 +298,11 @@ public partial class App : System.Windows.Application
         // is true when Windows wants animations enabled.
         bool reduce = s.Privacy.ReducePillAnimations || !SystemParameters.ClientAreaAnimation;
         _pill?.SetReduceAnimations(reduce);
+    }
+
+    private void UpdatePillHotkeyHint(KusPus.Core.Settings.AppSettings s)
+    {
+        _pill?.SetHotkeyHint(HotkeyChordFormat.Hint(s.Hotkey));
     }
 
     // ── Pill bridges ───────────────────────────────────────────────────────
@@ -303,8 +324,7 @@ public partial class App : System.Windows.Application
             {
                 return Task.CompletedTask;
             }
-            var next = current with { Audio = current.Audio with { InputDeviceId = id } };
-            return _prefs.SaveAsync(next);
+            return _prefs.UpdateAsync(s => s with { Audio = s.Audio with { InputDeviceId = id } });
         }
     }
 

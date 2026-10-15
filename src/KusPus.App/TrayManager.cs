@@ -1,3 +1,4 @@
+using KusPus.Coordination;
 using KusPus.Core.State;
 using KusPus.Persistence;
 using WinFormsApp = System.Windows.Forms;

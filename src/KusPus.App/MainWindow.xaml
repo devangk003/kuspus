@@ -893,7 +893,7 @@
                         <StackPanel Grid.Column="0">
                             <TextBlock Text="MIT licensed · Local-first · No telemetry."
                                        Style="{StaticResource Type.Footnote}"/>
-                            <TextBlock Text="Local · Privacy First"
+                            <TextBlock Text="Your words. Your PC. No one else."
                                        Style="{StaticResource Type.HintItalic}"
                                        Margin="0,4,0,0"/>
                         </StackPanel>

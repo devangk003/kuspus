@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using KusPus.Core.Settings;
+using KusPus.Coordination;
 using KusPus.Core.State;
 using KusPus.Persistence;
 
@@ -170,18 +171,10 @@ public partial class TrayMenuWindow : Window
 
     private void ApplyHotkeyKeycap(HotkeySettings hk)
     {
-        // Show only the last key in the chord (the trigger key) — full chord
-        // wouldn't fit. Modifier symbol composed inline.
-        var parts = new List<string>();
-        foreach (var m in hk.Modifiers)
-        {
-            parts.Add(ModifierGlyph(m));
-        }
-        if (hk.KeyCode is { } k)
-        {
-            parts.Add(KeyDisplay(k));
-        }
-        HotkeyKeycapText.Text = parts.Count == 0 ? "—" : string.Join(string.Empty, parts);
+        // Compact chord run (modifier glyphs + trigger key, no separators) —
+        // the full spelled-out chord wouldn't fit the keycap. Glyph mapping is
+        // shared with the pill's hover hint via HotkeyChordFormat.
+        HotkeyKeycapText.Text = HotkeyChordFormat.Keycap(hk);
     }
 
     private void ApplyActiveModel(string modelId)
@@ -194,35 +187,20 @@ public partial class TrayMenuWindow : Window
         ActiveModelText.Text = name;
     }
 
+    /// <summary>Product version from the assembly (Directory.Build.props KusPusVersion).</summary>
+    private static readonly string AppVersionText =
+        System.Reflection.CustomAttributeExtensions
+            .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(typeof(TrayMenuWindow).Assembly)
+            ?.InformationalVersion ?? "dev";
+
     private void ApplyStateSubtitle(AppState state)
     {
-        VersionSubtitle.Text = state switch
+        var stateText = state switch
         {
-            AppState.Recording => "Version 1.0.0 · Recording",
-            AppState.Transcribing => "Version 1.0.0 · Transcribing",
-            _ => "Version 1.0.0 · Idle",
+            AppState.Recording => "Recording",
+            AppState.Transcribing => "Transcribing",
+            _ => "Idle",
         };
+        VersionSubtitle.Text = $"Version {AppVersionText} · {stateText}";
     }
-
-    private static string ModifierGlyph(KusPus.Core.Hotkeys.VirtualKey vk) => vk switch
-    {
-        KusPus.Core.Hotkeys.VirtualKey.LeftCtrl => "^",
-        KusPus.Core.Hotkeys.VirtualKey.RightCtrl => "^",
-        KusPus.Core.Hotkeys.VirtualKey.LeftAlt => "⌥",
-        KusPus.Core.Hotkeys.VirtualKey.RightAlt => "⌥",
-        KusPus.Core.Hotkeys.VirtualKey.LeftShift => "⇧",
-        KusPus.Core.Hotkeys.VirtualKey.RightShift => "⇧",
-        KusPus.Core.Hotkeys.VirtualKey.LeftWin => "⊞",
-        KusPus.Core.Hotkeys.VirtualKey.RightWin => "⊞",
-        _ => vk.ToString(),
-    };
-
-    private static string KeyDisplay(KusPus.Core.Hotkeys.VirtualKey vk) => vk switch
-    {
-        KusPus.Core.Hotkeys.VirtualKey.Space => "Spc",
-        KusPus.Core.Hotkeys.VirtualKey.Return => "↵",
-        KusPus.Core.Hotkeys.VirtualKey.Tab => "⇥",
-        KusPus.Core.Hotkeys.VirtualKey.Escape => "Esc",
-        _ => vk.ToString().Length == 1 ? vk.ToString() : vk.ToString(),
-    };
 }

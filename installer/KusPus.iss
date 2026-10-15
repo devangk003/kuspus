@@ -23,7 +23,7 @@
 ; Build pipeline:
 ;   1. tools\build-whisper-windows.ps1  → installer\payload\whisper\
 ;   2. dotnet publish src\KusPus.App ...  → publish\win-x64\
-;   3. iscc.exe installer\KusPus.iss /DAppVersion=v1.0.0  → installer\Output\KusPus-Setup-v1.0.0.exe
+;   3. iscc.exe installer\KusPus.iss /DAppVersion=v1.5.0  → installer\Output\KusPus-Setup-v1.5.0.exe
 ;
 ; AppId is FIXED — never regenerate. Upgrade detection across versions depends
 ; on this GUID staying stable for the lifetime of the product.

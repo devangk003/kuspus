@@ -94,7 +94,7 @@
                                FontWeight="SemiBold"
                                Foreground="{DynamicResource PrimaryText}"/>
                     <TextBlock x:Name="VersionSubtitle"
-                               Text="Version 1.0.0 · Idle"
+                               Text="Version · Idle"
                                FontFamily="Segoe UI Variable Text, Segoe UI"
                                FontSize="11"
                                FontWeight="Regular"
