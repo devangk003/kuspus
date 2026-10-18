@@ -93,7 +93,7 @@ internal sealed class NotchPanelController : IDisposable
     private const double ConfirmHoldSec = 0.7;
     private const double ErrorHoldSec = 3.0;
     private const double HoverDwellMs = 300;
-    private const double HoverBandBelowNotch = 10;
+    private const double HoverBandBelowNotch = 1;
     private const double HoverMargin = 4;
 
     private enum PillVisual { Hidden, Idle, Armed, Recording, Transcribing, Confirmed, Error }
@@ -182,6 +182,8 @@ internal sealed class NotchPanelController : IDisposable
     private IDisposable? _prefsSub;
     private NSObject? _reduceMotionObserver;
     private NSObject? _screenObserver;
+    private NSObject? _globalMouseMonitor;
+    private NSObject? _localMouseMonitor;
     private IReadOnlyList<CoreAudioDevices.InputDevice>? _cachedMics;
 
     public NotchPanelController(
@@ -371,6 +373,17 @@ internal sealed class NotchPanelController : IDisposable
         _screenObserver = NSNotificationCenter.DefaultCenter.AddObserver(
             NSApplication.DidChangeScreenParametersNotification,
             _ => DispatchQueue.MainQueue.DispatchAsync(OnScreenParametersChanged));
+        // The panel ignores the mouse outside the island, so its tracking area goes quiet
+        // there; these monitors keep hover and passthrough current. The global one sees
+        // moves over other apps, the local one moves over our own windows. Mouse-move
+        // monitors need no Accessibility trust (only key monitors do).
+        const NSEventMask moves = NSEventMask.MouseMoved | NSEventMask.LeftMouseDragged;
+        _globalMouseMonitor = NSEvent.AddGlobalMonitorForEventsMatchingMask(moves, _ => OnMouseMoved());
+        _localMouseMonitor = NSEvent.AddLocalMonitorForEventsMatchingMask(moves, e =>
+        {
+            OnMouseMoved();
+            return e;
+        });
         UpdateReduceAnimations();
     }
 
@@ -393,6 +406,14 @@ internal sealed class NotchPanelController : IDisposable
         _prefsSub?.Dispose();
         _reduceMotionObserver?.Dispose();
         _screenObserver?.Dispose();
+        if (_globalMouseMonitor is not null)
+        {
+            NSEvent.RemoveMonitor(_globalMouseMonitor);
+        }
+        if (_localMouseMonitor is not null)
+        {
+            NSEvent.RemoveMonitor(_localMouseMonitor);
+        }
         _frameTimer?.Invalidate();
         _frameTimer = null;
         _tween.Dispose();
@@ -818,8 +839,41 @@ internal sealed class NotchPanelController : IDisposable
     private void ApplyIdlePassthrough()
     {
         bool passive = _notch.OverlapsContent && _current is PillVisual.Idle && !_dockOpen;
-        _panel.IgnoresMouseEvents = passive;
         _panel.AlphaValue = passive ? 0 : 1;
+        UpdateMousePassthrough();
+    }
+
+    /// <summary>
+    /// The panel is a fixed 573×112 pt footprint, and transparent pixels are not reliably
+    /// click-through on recent macOS. Only take the mouse while the cursor is over the
+    /// island (or its menu is up); everywhere else clicks fall through to the app below.
+    /// </summary>
+    private void UpdateMousePassthrough()
+    {
+        bool hidden = _notch.OverlapsContent && _current is PillVisual.Idle && !_dockOpen;
+        bool ignore = hidden || !(_pickerOpen || CursorInsideIsland());
+        if (_panel.IgnoresMouseEvents != ignore)
+        {
+            _logger.LogDebug("Island mouse passthrough → {Passthrough}.", ignore);
+            _panel.IgnoresMouseEvents = ignore;
+        }
+    }
+
+    private void OnMouseMoved()
+    {
+        if (_current is PillVisual.Hidden)
+        {
+            return;
+        }
+        if (!_pickerOpen)
+        {
+            bool inside = CursorInsideIsland();
+            if (inside != _hovering)
+            {
+                OnHoverChanged(inside);
+            }
+        }
+        UpdateMousePassthrough();
     }
 
     private void EnsureOnForegroundScreen()
@@ -848,19 +902,21 @@ internal sealed class NotchPanelController : IDisposable
     {
         var winRect = _root.ConvertRectToView(_island.Frame, null);
         var screenRect = _panel.ConvertRectToScreen(winRect);
-        // macOS keeps the cursor out of the hardware notch (it is clamped to the notch's
-        // bottom edge), so the closed island gets a hit band below it — Boring Notch's
-        // zeroHeightHoverPadding. The open island gets a small margin against flapping.
+        // The pointer normally travels behind the hardware notch and still reports its
+        // position there; only when the front app's menus spill past the notch does macOS
+        // clamp it to the notch's bottom edge. So the closed island triggers on the notch
+        // itself plus a 1 pt guard for that edge — nothing below it, where app tab bars
+        // and title bars live. The open island only gets a small margin against flapping.
         // The cursor can also sit exactly on the screen's top edge (y == maxY), which an
-        // exclusive Contains would miss, so the rect is padded above as well. Leaving
-        // uses a wider margin than entering (hysteresis against edge jitter).
-        double padBelow = (_dockOpen || _isPinned) ? HoverMargin : HoverBandBelowNotch;
-        double side = _hovering ? HoverMargin * 3 : HoverMargin;
+        // exclusive Contains would miss, so the rect is padded above as well.
+        bool open = _dockOpen || _isPinned;
+        double padBelow = open ? HoverMargin : HoverBandBelowNotch;
+        double side = open ? HoverMargin : 0;
         screenRect = new CGRect(
             screenRect.X - side,
-            screenRect.Y - padBelow - (_hovering ? HoverMargin * 2 : 0),
+            screenRect.Y - padBelow,
             screenRect.Width + (2 * side),
-            screenRect.Height + padBelow + (_hovering ? HoverMargin * 2 : 0) + HoverMargin * 2);
+            screenRect.Height + padBelow + HoverMargin);
         return screenRect.Contains(NSEvent.CurrentMouseLocation);
     }
 
@@ -1144,6 +1200,7 @@ internal sealed class NotchPanelController : IDisposable
                 OnHoverChanged(inside);
             }
         }
+        UpdateMousePassthrough();
         var now = DateTime.UtcNow;
         double dt = _lastFrameTime == DateTime.MinValue ? 0.016 : Math.Clamp((now - _lastFrameTime).TotalSeconds, 0, 0.064);
         _lastFrameTime = now;
@@ -1233,8 +1290,8 @@ internal sealed class NotchPanelController : IDisposable
 
     /// <summary>
     /// Borderless, non-activating, transparent panel above the menu bar (Boring Notch's
-    /// <c>BoringNotchWindow</c>). Fully transparent pixels are click-through, so the
-    /// unused footprint around the island never blocks the menu bar.
+    /// <c>BoringNotchWindow</c>). <see cref="UpdateMousePassthrough"/> toggles
+    /// IgnoresMouseEvents so the unused footprint around the island never blocks clicks.
     /// </summary>
     private sealed class NotchPanel : NSPanel
     {
